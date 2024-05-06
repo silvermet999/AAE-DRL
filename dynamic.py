@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.preprocessing import LabelEncoder, RobustScaler, MaxAbsScaler
 
 
 
@@ -15,43 +16,75 @@ for file in csv_files:
     df["Before or After reboot"] = reboot_status
     dfs.append(df)
 df = pd.concat(dfs, ignore_index=True)
-df.drop("Hash", axis=1)
+df = df.drop("Hash", axis=1)
 
 
+info = df.info()
+description = df.describe()
+# description.to_csv('descriptive_stats.csv')
+# info.to_csv('info_stats.csv')
+
+
+
+
+memory_cols = df.filter(regex='^Memory')
+api_cols = df.filter(regex='^API')
+network_cols = df.filter(regex='^Network')
+battery_cols = df.filter(regex='^Battery')
+logcat_cols = df.filter(regex='^Logcat')
+process_col = df["Process_total"]
+
+
+def corr_map(cols):
+    plt.figure(figsize=(20, 20))
+    sns.heatmap(cols.corr(), annot=True, cmap='coolwarm', fmt=".2f")
+    plt.title('Correlation Heatmap')
+    # plt.savefig("memory corr")
 
 def univariate_analysis(data, features):
-    for feature in features:
+    for i in features:
         plt.figure(figsize=(10, 5))
         plt.xticks(rotation=90, fontsize=15)
-        plt.xlabel(f'{feature}')
-        plt.title(f"Bar plot for {feature}")
-        sns.histplot(data[feature], bins=100, kde=False)
-        plt.savefig(f"{feature}.png")
-        plt.show()
+        plt.xlabel(f'{i}')
+        plt.title(f"Bar plot for {i}")
+        sns.histplot(data[i], bins=100, kde=False)
+        plt.savefig(f"{i}.png")
 
-memory_columns = df.filter(regex='^Memory')
-api_columns = df.filter(regex='^API')
-network_columns = df.filter(regex='^Network')
-battery_columns = df.filter(regex='^Battery')
-logcat_columns = df.filter(regex='^Logcat')
-process_column = df["Process_total"]
-
-# univariate_analysis(memory_columns, memory_columns.columns)
-# univariate_analysis(api_columns, api_columns.columns)
-# univariate_analysis(network_columns, network_columns.columns)
-# univariate_analysis(battery_columns, battery_columns.columns)
-# univariate_analysis(logcat_columns, logcat_columns.columns)
-
-plt.figure(figsize=(20, 20))
-sns.heatmap(memory_columns.corr(), annot=True, cmap='coolwarm', fmt=".2f")
-plt.title('Correlation Heatmap')
-# plt.savefig("memory corr")
+# univariate_analysis(memory_cols, memory_columns.columns)
+# univariate_analysis(api_cols, api_columns.columns)
+# univariate_analysis(network_cols, network_columns.columns)
+# univariate_analysis(battery_cols, battery_columns.columns)
+# univariate_analysis(logcat_cols, logcat_columns.columns)
 
 
 
-def multivariate_analysis(data_col, dfs):
+def multivariate_analysis(data_col):
     sns.set_theme(style="ticks")
     for i in data_col.columns:
         for df in dfs:
-            sns.lmplot(data=df, x=data_col[i], col="Before or After reboot", hue="Before or After reboot",
+            sns.lmplot(data=df, x=data_col.loc[i], col="Before or After reboot", hue="Before or After reboot",
                        col_wrap=2, palette="muted", ci=None, height=4, scatter_kws={"s": 50, "alpha": 1})
+
+
+
+encoder = LabelEncoder()
+cols = ["Category", "Family", "Before or After reboot"]
+for i in cols:
+    df[i] = encoder.fit_transform(df[i])
+
+
+
+def robust_scaler(df):
+    scaler = RobustScaler()
+    df = scaler.fit_transform(df)
+    return df
+
+df_v1 = robust_scaler(df)
+
+
+def max_abs_scaler(df):
+    scaler = MaxAbsScaler()
+    df = scaler.fit_transform(df)
+    return df
+
+df_v2 = max_abs_scaler(df)
