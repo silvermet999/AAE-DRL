@@ -68,18 +68,19 @@ def multivariate_analysis(data_col):
 
 
 encoder = LabelEncoder()
-cols = ["Category", "Family", "Before or After reboot"]
-for i in cols:
+y = ["Category", "Family", "Before or After reboot"]
+for i in y:
     df[i] = encoder.fit_transform(df[i])
 
 
+X = df.drop(y)
 
 def robust_scaler(df):
     scaler = RobustScaler()
     df = scaler.fit_transform(df)
     return df
 
-df_v1 = robust_scaler(df)
+X_rs = robust_scaler(X)
 
 
 def max_abs_scaler(df):
@@ -87,4 +88,4 @@ def max_abs_scaler(df):
     df = scaler.fit_transform(df)
     return df
 
-df_v2 = max_abs_scaler(df)
+X_mas = max_abs_scaler(X)
