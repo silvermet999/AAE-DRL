@@ -43,18 +43,18 @@ def corr_map(cols):
 
 def univariate_analysis(data, features):
     for i in features:
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(10, 10))
         plt.xticks(rotation=90, fontsize=15)
         plt.xlabel(f'{i}')
         plt.title(f"Bar plot for {i}")
         sns.histplot(data[i], bins=100, kde=False)
         plt.savefig(f"{i}.png")
 
-# univariate_analysis(memory_cols, memory_columns.columns)
-# univariate_analysis(api_cols, api_columns.columns)
-# univariate_analysis(network_cols, network_columns.columns)
-# univariate_analysis(battery_cols, battery_columns.columns)
-# univariate_analysis(logcat_cols, logcat_columns.columns)
+# univariate_analysis(memory_cols, memory_cols.columns)
+# univariate_analysis(api_cols, api_cols.columns)
+# univariate_analysis(network_cols, network_cols.columns)
+# univariate_analysis(battery_cols, battery_cols.columns)
+# univariate_analysis(logcat_cols, logcat_cols.columns)
 
 
 
@@ -73,7 +73,7 @@ for i in y:
     df[i] = encoder.fit_transform(df[i])
 
 
-X = df.drop(y)
+X = df.drop(y, axis = 1)
 
 def robust_scaler(df):
     scaler = RobustScaler()
