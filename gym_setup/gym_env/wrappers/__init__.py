@@ -1,0 +1,1 @@
+from gym_setup.gym_env.wrappers.reacher_weighted_reward import ReacherRewardWrapper
