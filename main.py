@@ -16,14 +16,18 @@ for file in csv_files:
     df["Before or After reboot"] = reboot_status
     dfs.append(df)
 df = pd.concat(dfs, ignore_index=True)
-df = df.drop("Hash", axis=1)
+df = df.drop(["Hash"], axis=1)
+df = df.drop(df.columns[df.nunique() == 1], axis = 1)
+df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
 
 
-info = df.info()
+
+datatypes = pd.DataFrame(df.dtypes)
+null_count = df.count()
 description = df.describe()
 # description.to_csv('descriptive_stats.csv')
-# info.to_csv('info_stats.csv')
-
+# df_datatypes.to_csv("dtypes.csv")
+# df_null_count.to_csv("null.csv")
 
 
 
@@ -41,6 +45,8 @@ def corr_map(cols):
     plt.title('Correlation Heatmap')
     # plt.savefig("memory corr")
 
+
+
 def univariate_analysis(data, features):
     for i in features:
         plt.figure(figsize=(10, 10))
@@ -48,7 +54,7 @@ def univariate_analysis(data, features):
         plt.xlabel(f'{i}')
         plt.title(f"Bar plot for {i}")
         sns.histplot(data[i], bins=100, kde=False)
-        plt.savefig(f"{i}.png")
+        # plt.savefig(f"{i}.png")
 
 # univariate_analysis(memory_cols, memory_cols.columns)
 # univariate_analysis(api_cols, api_cols.columns)

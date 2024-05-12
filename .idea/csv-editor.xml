@@ -3,7 +3,175 @@
   <component name="CsvFileAttributes">
     <option name="attributeMap">
       <map>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Adware_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Backdoor_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Backdoor_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/FileInfector_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/FileInfector_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/No_Category_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/No_Category_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/PUA_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/PUA_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Ransomware_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Ransomware_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Scareware_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Scareware_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Banker_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Banker_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Dropper_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Dropper_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_SMS_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_SMS_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Spy_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_Spy_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Trojan_before_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Zero_Day_after_reboot_Cat.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/AndMal2020-dynamic-BeforeAndAfterReboot/Zero_Day_before_reboot_Cat.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
@@ -17,7 +185,14 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/t.csv">
+        <entry key="/dtypes.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/null.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
