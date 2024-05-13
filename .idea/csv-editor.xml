@@ -178,6 +178,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/desc_mem.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/descriptive_stats.csv">
           <value>
             <Attribute>
@@ -186,6 +193,13 @@
           </value>
         </entry>
         <entry key="/dtypes.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/highly_correlated_features.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />

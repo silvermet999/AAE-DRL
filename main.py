@@ -13,10 +13,9 @@ dfs = []
 for file in csv_files:
     df = pd.read_csv(os.path.join(directory, file))
     reboot_status = "before" if "before" in file else "after"
-    df["Before or After reboot"] = reboot_status
+    df["Before_or_After_Reboot"] = reboot_status
     dfs.append(df)
 df = pd.concat(dfs, ignore_index=True)
-df = df.drop(["Hash"], axis=1)
 df = df.drop(df.columns[df.nunique() == 1], axis = 1)
 df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
 
@@ -39,46 +38,45 @@ logcat_cols = df.filter(regex='^Logcat')
 process_col = df["Process_total"]
 
 
-def corr_map(cols):
-    plt.figure(figsize=(20, 20))
-    sns.heatmap(cols.corr(), annot=True, cmap='coolwarm', fmt=".2f")
-    plt.title('Correlation Heatmap')
-    # plt.savefig("memory corr")
-
-
-
-def univariate_analysis(data, features):
+def histogram_plot(data, features):
     for i in features:
         plt.figure(figsize=(10, 10))
         plt.xticks(rotation=90, fontsize=15)
         plt.xlabel(f'{i}')
-        plt.title(f"Bar plot for {i}")
-        sns.histplot(data[i], bins=100, kde=False)
+        plt.title(f"histogram for {i}")
+        sns.histplot(data[i], bins=100, kde=True)
         # plt.savefig(f"{i}.png")
 
-# univariate_analysis(memory_cols, memory_cols.columns)
-# univariate_analysis(api_cols, api_cols.columns)
-# univariate_analysis(network_cols, network_cols.columns)
-# univariate_analysis(battery_cols, battery_cols.columns)
-# univariate_analysis(logcat_cols, logcat_cols.columns)
+# histogram_plot(memory_cols, memory_cols.columns)
+# histogram_plot(api_cols, api_cols.columns)
+# histogram_plot(network_cols, network_cols.columns)
+# histogram_plot(battery_cols, battery_cols.columns)
+# histogram_plot(logcat_cols, logcat_cols.columns)
 
+encoder = LabelEncoder()
+cols = ["Category", "Family", "Before_or_After_Reboot", "Hash"]
+for i in cols:
+    df[i] = encoder.fit_transform(df[i])
 
+correlation = df.corr()
+highly_correlated_features = {}
+for column in correlation.columns:
+    correlated_with = list(correlation.index[correlation[column] >= 0.75])
+    for corr_col in correlated_with:
+        if corr_col != column:
+            df_corr = correlation.loc[corr_col, column]
+            highly_correlated_features[(column, corr_col)] = df_corr
 
 def multivariate_analysis(data_col):
     sns.set_theme(style="ticks")
     for i in data_col.columns:
         for df in dfs:
-            sns.lmplot(data=df, x=data_col.loc[i], col="Before or After reboot", hue="Before or After reboot",
+            sns.lmplot(data=df, x=data_col.loc[i], col="Before_or_After_Reboot", hue="Before_or_After_Reboot",
                        col_wrap=2, palette="muted", ci=None, height=4, scatter_kws={"s": 50, "alpha": 1})
 
 
 
-encoder = LabelEncoder()
-y = ["Category", "Family", "Before or After reboot"]
-for i in y:
-    df[i] = encoder.fit_transform(df[i])
-
-
+y = df[["Category", "Family", "Before_or_After_Reboot"]]
 X = df.drop(y, axis = 1)
 
 def robust_scaler(df):
