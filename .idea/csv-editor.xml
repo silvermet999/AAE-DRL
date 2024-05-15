@@ -178,6 +178,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/corr.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/desc_mem.csv">
           <value>
             <Attribute>
@@ -199,7 +206,7 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/highly_correlated_features.csv">
+        <entry key="/f_corr.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
