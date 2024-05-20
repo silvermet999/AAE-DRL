@@ -82,22 +82,7 @@ for column in correlation.columns:
 f_corr = pd.DataFrame.from_dict(f_corr, orient="index")
 f_corr = f_corr.drop_duplicates()
 # f_corr.to_csv("f_corr.csv")
-df_no_corr_3 = df.drop(df_corr[["Memory_PssClean", "Memory_HeapAlloc", "Memory_HeapFree",
-                                "API_Binder_android.app.ContextImpl_registerReceiver",
-                                "API_DexClassLoader_dalvik.system.BaseDexClassLoader_findLibrary",
-                                "Network_TotalReceivedBytes", "Network_TotalReceivedPackets"]], axis = 1)
-df_no_corr_2 = df_no_corr_3.drop(df_no_corr_3[["Memory_PrivateDirty", "Memory_Activities", "Memory_ProxyBinders",
-                                   "Memory_ParcelMemory", "API_Command_java.lang.ProcessBuilder_start",
-                                   "API_Database_android.database.sqlite.SQLiteDatabase_deleteDatabase",
-                                               "API_Database_android.database.sqlite.SQLiteDatabase_getPath",
-                                               "API_Database_android.database.sqlite.SQLiteDatabase_compileStatement",
-                                               "API_Database_android.database.sqlite.SQLiteDatabase_query",
-                                               "API_IPC_android.content.ContextWrapper_startActivity",
-                                               "API_DeviceInfo_android.net.wifi.WifiInfo_getBSSID",
-                                               "API_DeviceInfo_android.net.wifi.WifiInfo_getIpAddress",
-                                               "API_Base64_android.util.Base64_encode",
-                                               "API_DeviceData_android.location.Location_getLatitude",
-                                               "Logcat_error"]], axis = 1)
+
 
 
 
@@ -114,6 +99,7 @@ def robust_scaler(df):
     return df
 
 X_rs = robust_scaler(X)
+# np.isnan(X_rs).any()
 
 
 def max_abs_scaler(df):
@@ -124,7 +110,11 @@ def max_abs_scaler(df):
 X_mas = max_abs_scaler(X)
 
 
-def PCA_alg():
-    pca = PCA(n_components=100)
+def PCA_alg(df):
+    pca = PCA()
+    pca.fit_transform(df)
+    return df
 
+X_pca_rs = PCA_alg(X_rs)
+X_pca_mas = PCA_alg(X_mas)
 

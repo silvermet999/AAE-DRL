@@ -5,7 +5,6 @@ import numpy as np
 import math
 import itertools
 import torchvision.transforms as transforms
-from torchvision.utils import save_image
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,13 +19,15 @@ parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first 
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--latent_dim", type=int, default=10, help="dimensionality of the latent code")
-parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")
-parser.add_argument("--channels", type=int, default=1, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=400, help="interval between image sampling")
+parser.add_argument("--input_size", type=int, default=32, help="size of each input dimension")
+parser.add_argument("--channels", type=int, default=1, help="number of input channels")
+parser.add_argument("--sample_interval", type=int, default=400, help="interval between input sampling")
 opt = parser.parse_args()
 print(opt)
 
-img_shape = (opt.channels, opt.img_size, opt.img_size)
+input_shape_rs = main.X_rs.shape
+input_shape_mas = main.X_mas.shape
+
 
 cuda = True if torch.cuda.is_available() else False
 
@@ -53,7 +54,7 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(int(np.prod(img_shape)), 512),
+            nn.Linear(int(np.prod(input_shape_rs)), 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
@@ -65,10 +66,10 @@ class Encoder(nn.Module):
         self.logvar = nn.Linear(512, opt.latent_dim)
 
 # forward propagation
-    def forward(self, img):
+    def forward(self, input):
         # view() flatten
-        img_flat = img.view(img.shape[0], -1)
-        x = self.model(img_flat)
+        input_flat = input.view(input.shape[0], -1)
+        x = self.model(input_flat)
         mu = self.mu(x)
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar)
@@ -85,14 +86,14 @@ class Decoder(nn.Module):
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, int(np.prod(img_shape))),
+            nn.Linear(512, int(np.prod(input_shape_rs))),
             nn.Tanh(),
         )
 
     def forward(self, z):
-        img_flat = self.model(z)
-        img = img_flat.view(img_flat.shape[0], *img_shape)
-        return img
+        input_flat = self.model(z)
+        input = input_flat.view(input_flat.shape[0], *input_shape_rs)
+        return input
 
 
 class Discriminator(nn.Module):
