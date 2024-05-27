@@ -1,3 +1,4 @@
+"""-----------------------------------------------import libraries-----------------------------------------------"""
 import main
 import argparse
 import os
@@ -10,10 +11,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from torch import Tensor
+from torchsummary import summary
 
+
+
+"""-----------------------------------------------command-line options-----------------------------------------------"""
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
+parser.add_argument("--n_epochs", type=int, default=2, help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=0, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -24,14 +29,24 @@ parser.add_argument("--channels", type=int, default=1, help="number of input cha
 parser.add_argument("--sample_interval", type=int, default=400, help="interval between input sampling")
 opt = parser.parse_args()
 print(opt)
+cuda = True if torch.cuda.is_available() else False
+torch_gpu = torch.empty((20000, 20000)).cuda()
+torch.cuda.memory_allocated()
 
+
+
+"""-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 input_shape_rs = main.X_rs.shape
 input_shape_mas = main.X_mas.shape
+nn_dim = 512
+latent_dim = 10
+lr = 0.005
+batch_size = 32
+n_epochs = 1
 
 
-cuda = True if torch.cuda.is_available() else False
 
-
+"""-----------------------------------------------------classes-----------------------------------------------------"""
 def reparameterization(mu, logvar):
     std = torch.exp(logvar / 2)
     """ 
@@ -49,12 +64,12 @@ def reparameterization(mu, logvar):
 
 
 # module compatible with PyTorch
-class Encoder(nn.Module):
+class EncoderGenerator(nn.Module):
     def __init__(self):
-        super(Encoder, self).__init__()
+        super(EncoderGenerator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(int(np.prod(input_shape_rs)), 512),
+            nn.Linear(2, 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
@@ -62,8 +77,8 @@ class Encoder(nn.Module):
         )
 
         # projects output to the dim of latent space
-        self.mu = nn.Linear(512, opt.latent_dim)
-        self.logvar = nn.Linear(512, opt.latent_dim)
+        self.mu = nn.Linear(nn_dim, opt.latent_dim)
+        self.logvar = nn.Linear(nn_dim, opt.latent_dim)
 
 # forward propagation
     def forward(self, input):
@@ -81,7 +96,7 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 512),
+            nn.Linear(opt.latent_dim, nn_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
@@ -101,7 +116,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(opt.latent_dim, 512),
+            nn.Linear(opt.latent_dim, nn_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 256),
             nn.LeakyReLU(0.2, inplace=True),
@@ -118,14 +133,13 @@ class Discriminator(nn.Module):
 adversarial_loss = torch.nn.BCELoss()
 pixelwise_loss = torch.nn.L1Loss()
 
-# Initialize generator and discriminator
-encoder = Encoder()
-decoder = Decoder()
-discriminator = Discriminator()
-
-if cuda:
-    encoder.cuda()
-    decoder.cuda()
-    discriminator.cuda()
-    adversarial_loss.cuda()
-    pixelwise_loss.cuda()
+# encoder_generator = EncoderGenerator()
+# decoder = Decoder()
+# discriminator = Discriminator()
+#
+# if cuda:
+#     encoder_generator.cuda()
+#     decoder.cuda()
+#     discriminator.cuda()
+#     adversarial_loss.cuda()
+#     pixelwise_loss.cuda()
