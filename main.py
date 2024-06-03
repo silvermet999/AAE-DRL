@@ -74,7 +74,7 @@ for i in cols:
 correlation = df.corr()
 f_corr = {}
 for column in correlation.columns:
-    correlated_with = list(correlation.index[correlation[column] >= 0.75])
+    correlated_with = list(correlation.index[(correlation[column] >= 0.75) | (correlation[column] <= -0.75)])
     for corr_col in correlated_with:
         if corr_col != column:
             df_corr = correlation.loc[corr_col, column]
@@ -111,8 +111,8 @@ X_mas = max_abs_scaler(X)
 
 
 def PCA_alg(df):
-    pca = PCA()
-    pca.fit_transform(df)
+    pca = PCA(n_components=10)
+    df = pca.fit_transform(df)
     return df
 
 X_pca_rs = PCA_alg(X_rs)

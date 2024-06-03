@@ -8,16 +8,12 @@ from ray.rllib.models import ModelCatalog
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
 from ray.rllib.core.learner.learner import Learner
 import shutil
-import AAE
-
-
-ModelCatalog.register_custom_model("AAE_DRL", AAE.AAE_DRL)
-
 
 
 def main():
     chkpt_root = "temp"
-    # shutil.rmtree is a function that removes a directory tree recursively. It takes a path-like object or a string as an argument and returns nothing.
+    """shutil.rmtree is a function that removes a directory tree recursively. It takes a path-like object or a string 
+    as an argument and returns nothing."""
     shutil.rmtree(chkpt_root, ignore_errors=True, onerror=None)
     # init directory in which to log results
     ray_results = "{}/ray_results/".format(os.getenv("HOME"))
@@ -31,10 +27,10 @@ def main():
 
     config = PPOConfig().environment(select_env)
     config.framework("tf2")
-    config.model_config = {
-        "fcnet_hiddens": [64, 64],
-        "fcnet_activation": "relu"
-    }
+    # config.model_config = {
+    #     "fcnet_hiddens": [64, 64],
+    #     "fcnet_activation": "relu"
+    # }
     # config["lr"] = 0.005
     # config["model"]["custom_model_config"] = {
     #     "fcnet_hiddens": [64, 64],

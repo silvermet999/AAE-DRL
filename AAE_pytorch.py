@@ -12,13 +12,15 @@ import torch.nn.functional as F
 import torch
 from torch import Tensor
 from torchsummary import summary
+from torch.nn import parallel as par
+from torch import distributed as dist
 
 
 
 """-----------------------------------------------command-line options-----------------------------------------------"""
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=2, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=0, help="size of the batches")
+parser.add_argument("--n_epochs", type=int, default=10, help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=12, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -30,19 +32,18 @@ parser.add_argument("--sample_interval", type=int, default=400, help="interval b
 opt = parser.parse_args()
 print(opt)
 cuda = True if torch.cuda.is_available() else False
+
 torch_gpu = torch.empty((20000, 20000)).cuda()
 torch.cuda.memory_allocated()
 
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-input_shape_rs = main.X_rs.shape
-input_shape_mas = main.X_mas.shape
+input_shape_rs = main.X_pca_rs.shape
+input_shape_mas = main.X_pca_mas.shape
 nn_dim = 512
 latent_dim = 10
 lr = 0.005
-batch_size = 32
-n_epochs = 1
 
 
 
@@ -69,7 +70,7 @@ class EncoderGenerator(nn.Module):
         super(EncoderGenerator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(2, 512),
+            nn.Linear(int(np.prod(input_shape_rs)), 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.BatchNorm1d(512),
@@ -79,6 +80,7 @@ class EncoderGenerator(nn.Module):
         # projects output to the dim of latent space
         self.mu = nn.Linear(nn_dim, opt.latent_dim)
         self.logvar = nn.Linear(nn_dim, opt.latent_dim)
+
 
 # forward propagation
     def forward(self, input):
@@ -130,16 +132,30 @@ class Discriminator(nn.Module):
 
 
 # Use binary cross-entropy loss
-adversarial_loss = torch.nn.BCELoss()
-pixelwise_loss = torch.nn.L1Loss()
+adversarial_loss = torch.nn.BCELoss().cuda()
+pixelwise_loss = torch.nn.L1Loss().cuda()
 
-# encoder_generator = EncoderGenerator()
-# decoder = Decoder()
-# discriminator = Discriminator()
-#
-# if cuda:
-#     encoder_generator.cuda()
-#     decoder.cuda()
-#     discriminator.cuda()
-#     adversarial_loss.cuda()
-#     pixelwise_loss.cuda()
+
+
+encoder_generator = EncoderGenerator().cuda()
+# decoder = Decoder().cuda()
+# discriminator = Discriminator().cuda()
+
+
+
+"""_________________________________in case of more than one gpu (not the case here)_________________________________"""
+def init_process():
+    dist.init_process_group(
+        backend='gloo',
+        init_method='tcp://127.0.0.1:9000',
+        rank=0,
+        world_size=1
+    )
+
+def main():
+    init_process()
+    par.DataParallel(encoder_generator)
+    dist.destroy_process_group()
+
+if __name__ == '__main__':
+    main()
