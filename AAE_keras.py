@@ -1,194 +1,153 @@
-from __future__ import print_function, division
-from sklearn.model_selection import train_test_split
-import main
-import tensorflow as tf
-from tensorflow.keras.layers import (Input, Dense, Reshape, Flatten, Dropout, multiply, GaussianNoise,
-                                     BatchNormalization, Activation, Embedding, ZeroPadding2D, MaxPooling2D,
-                                     Lambda, LeakyReLU, UpSampling1D, Conv1D)
-from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras import losses
-from tensorflow.keras.utils import to_categorical
-import tensorflow.keras.backend as K
-
-import matplotlib.pyplot as plt
-
+"""_________________________________________________import libraries_________________________________________________"""
 import numpy as np
-
-class AdversarialAutoencoder():
-    def __init__(self):
-        self.input_rows = 28
-        self.input_cols = 28
-        self.channels = 1
-        self.input_shape = (self.input_rows, self.input_cols, self.channels)
-        self.latent_dim = 10
-
-        optimizer = Adam(0.0002, 0.5)
-
-        # Build and compile the discriminator
-        self.discriminator = self.build_discriminator()
-        self.discriminator.compile(loss='binary_crossentropy',
-            optimizer=optimizer,
-            metrics=['accuracy'])
-
-        # Build the encoder / decoder
-        self.encoder = self.build_encoder()
-        self.decoder = self.build_decoder()
-
-        input = Input(shape=self.input_shape)
-        # The generator takes the input, encodes it and reconstructs it
-        # from the encoding
-        encoded_repr = self.encoder(input)
-        reconstructed_input = self.decoder(encoded_repr)
-
-        # For the adversarial_autoencoder model we will only train the generator
-        self.discriminator.trainable = False
-
-        # The discriminator determines validity of the encoding
-        validity = self.discriminator(encoded_repr)
-
-        # The adversarial_autoencoder model  (stacked generator and discriminator)
-        self.adversarial_autoencoder = Model(input, [reconstructed_input, validity])
-        self.adversarial_autoencoder.compile(loss=['mse', 'binary_crossentropy'],
-            loss_weights=[0.999, 0.001],
-            optimizer=optimizer)
+from tensorflow import Variable
+from tensorflow.keras.layers import Layer
+from tensorflow.keras.models import Model
+from tensorflow.nn import sigmoid, relu, sigmoid_cross_entropy_with_logits
+from tensorflow.keras.optimizers import Adam
+from keras import Input
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import main
 
 
-    def build_encoder(self):
-        # Encoder
-
-        input = Input(shape=self.input_shape)
-
-        h = Flatten()(input)
-        h = Dense(512)(h)
-        h = LeakyReLU(alpha=0.2)(h)
-        h = Dense(512)(h)
-        h = LeakyReLU(alpha=0.2)(h)
-        mu = Dense(self.latent_dim)(h)
-        log_var = Dense(self.latent_dim)(h)
-        def sampling(args):
-            mu, log_var = args
-            batch = tf.shape(mu)[0]
-            dim = tf.shape(mu)[1]
-            epsilon = tf.random_normal(shape=(batch, dim))
-            return mu + K.exp(log_var / 2) * epsilon
-        latent_repr = Lambda(sampling, output_shape=(self.latent_dim,))([h, mu, log_var])
-
-        return Model(input, latent_repr)
-
-    def build_decoder(self):
-
-        model = Sequential()
-
-        model.add(Dense(512, input_dim=self.latent_dim))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(512))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(np.prod(self.input_shape), activation='tanh'))
-        model.add(Reshape(self.input_shape))
-
-        model.summary()
-
-        z = Input(shape=(self.latent_dim,))
-        input = model(z)
-
-        return Model(z, input)
-
-    def build_discriminator(self):
-
-        model = Sequential()
-
-        model.add(Dense(512, input_dim=self.latent_dim))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(256))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dense(1, activation="sigmoid"))
-        model.summary()
-
-        encoded_repr = Input(shape=(self.latent_dim, ))
-        validity = model(encoded_repr)
-
-        return Model(encoded_repr, validity)
-
-    def train(self, epochs, batch_size=1, sample_interval=5):
-
-        # Load the dataset
-        X_train, X_test, y_train, y_test = train_test_split(main.X_pca_rs, main.y, test_size=0.2, random_state=42)
-        # X_train, X_test, y_train, y_test = train_test_split(main.X_pca_mas, main.y, test_size=0.2, random_state=42)
-
-        # Rescale -1 to 1
-        # X_train = (X_train.astype(np.float32) - 127.5) / 127.5
-        # X_train = np.expand_dims(X_train, axis=3)
-
-        # Adversarial ground truths
-        valid = np.ones((batch_size, 1))
-        fake = np.zeros((batch_size, 1))
-
-        for epoch in range(epochs):
-
-            # ---------------------
-            #  Train Discriminator
-            # ---------------------
-
-            # Select a random batch of samples
-            idx = np.random.randint(0, X_train.shape[0], batch_size)
-            inputs = X_train[idx]
-
-            latent_fake = self.encoder.predict(inputs)
-            latent_real = np.random.normal(size=(batch_size, self.latent_dim))
-
-            # Train the discriminator
-            d_loss_real = self.discriminator.train_on_batch(latent_real, valid)
-            d_loss_fake = self.discriminator.train_on_batch(latent_fake, fake)
-            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
-            # ---------------------
-            #  Train Generator
-            # ---------------------
-
-            # Train the generator
-            g_loss = self.adversarial_autoencoder.train_on_batch(inputs, [inputs, valid])
-
-            # Plot the progress
-            print ("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (epoch, d_loss[0], 100*d_loss[1], g_loss[0], g_loss[1]))
-
-            # If at save interval => save generated samples
-            if epoch % sample_interval == 0:
-                self.gen_samples(epoch)
-
-    def gen_samples(self, epoch):
-        r, c = 5, 5
-
-        z = np.random.normal(size=(r*c, self.latent_dim))
-        gen_inputs = self.decoder.predict(z)
-
-        gen_inputs = 0.5 * gen_inputs + 0.5
-
-        fig, axs = plt.subplots(r, c)
-        cnt = 0
-        for i in range(r):
-            for j in range(c):
-                axs[i,j].imshow(gen_inputs[cnt, :,:,0], cmap='gray')
-                axs[i,j].axis('off')
-                cnt += 1
-        fig.savefig("runs/_%d.png" % epoch)
-        plt.close()
-
-    def save_model(self):
-
-        def save(model, model_name):
-            model_path = "saved_model/%s.json" % model_name
-            weights_path = "saved_model/%s_weights.hdf5" % model_name
-            options = {"file_arch": model_path,
-                        "file_weight": weights_path}
-            json_string = model.to_json()
-            open(options['file_arch'], 'w').write(json_string)
-            model.save_weights(options['file_weight'])
-
-        save(self.generator, "aae_generator")
-        save(self.discriminator, "aae_discriminator")
 
 
-if __name__ == '__main__':
-    aae = AdversarialAutoencoder()
-    aae.train(epochs=10, batch_size=6, sample_interval=1)
+"""______________________________________________________params______________________________________________________"""
+# normal dist
+def init_function(shape):
+    return tf.random.normal(shape, stddev=1 / tf.sqrt(shape[0] / 2))
+
+
+class params:
+    def __init__(self, input_dim, nn_dim, z_dim):
+        self.input_dim = input_dim
+        self.nn_dim = nn_dim
+        self.z_dim = z_dim
+
+        self.disc_W = self.init_disc_W()
+        self.disc_B = self.init_disc_B()
+        self.ae_W = self.init_ae_W()
+        self.ae_B = self.init_ae_B()
+
+    def init_disc_W(self):
+        return {
+            "disc_1": Variable(init_function([self.z_dim, self.nn_dim])),
+            "disc_2": Variable(init_function([self.nn_dim, 1]))
+        }
+
+    def init_disc_B(self):
+        return {
+            "disc_1": Variable(init_function([self.nn_dim])),
+            "disc_2": Variable(init_function([1]))
+        }
+
+    def init_ae_W(self):
+        return {
+            "enc_W_1" : Variable(init_function([self.input_dim, self.nn_dim])),
+            "enc_W_2" : Variable(init_function([self.nn_dim, self.z_dim])),
+            "dec_W_1" : Variable(init_function([self.z_dim, self.nn_dim])),
+            "dec_W_2" : Variable(init_function([self.nn_dim, self.input_dim])),
+        }
+
+    def init_ae_B(self):
+        return {
+            "enc_B_1" : Variable(init_function([self.nn_dim])),
+            "enc_B_2" : Variable(init_function([self.z_dim])),
+            "dec_B_1" : Variable(init_function([self.nn_dim])),
+            "dec_B_2" : Variable(init_function([self.input_dim])),
+        }
+
+    def get_disc_W(self):
+        return self.disc_W
+
+    def get_disc_B(self):
+        return self.disc_B
+
+    def get_ae_W(self):
+        return self.ae_W
+
+    def get_ae_B(self):
+        return self.ae_B
+
+
+
+"""______________________________________________________archi______________________________________________________"""
+class Encoder(Layer):
+    def __init__(self, ae_W, ae_B, **kwargs):
+        super(Encoder, self).__init__(**kwargs)
+        self.ae_W = ae_W
+        self.ae_B = ae_B
+
+    def call(self, x):
+        hidden_layer = relu(tf.add(tf.matmul(x, self.ae_W), self.ae_B))
+        enc_output = tf.add(tf.matmul(hidden_layer, self.ae_W), self.ae_B)
+        return enc_output
+
+    # def compute_output_spec(self, input_spec):
+    #     input_shape = input_spec.as_list()
+    #     hidden_dim = self.ae_W.shape[0]
+    #     return tf.TensorSpec(shape=[input_shape[0], hidden_dim], dtype=tf.float32)
+
+def Decoder(x, ae_W, ae_B):
+    hidden_layer = relu(tf.add(tf.matmul(x, ae_W["dec_W_1"]), ae_B["dec_B_1"]))
+    dec_output = tf.add(tf.matmul(hidden_layer, ae_W["dec_W_2"]), ae_B["dec_B_2"])
+    prob = sigmoid(dec_output)
+    return prob, dec_output
+
+def Discriminator(x, disc_W, disc_B):
+    hidden_layer = relu(tf.add(tf.matmul(x, disc_W["disc_1"]), disc_B["disc_1"]))
+    final_output = tf.add(tf.matmul(hidden_layer, disc_W["disc_2"]), disc_B["disc_2"])
+    disc_output = sigmoid(final_output)
+    return disc_output
+
+
+
+"""___________________________________________________loss and opt___________________________________________________"""
+def ae_loss():
+    ae_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(logits=final_output, labels=x_input))
+    return ae_loss
+
+def disc_loss():
+    disc_loss = -tf.reduce_mean(tf.log(real_output_disc) + tf.log(1 - fake_output_disc))
+    return disc_loss
+
+def gen_loss():
+    gen_loss = -tf.reduce_mean(tf.log(fake_output_disc))
+    return gen_loss
+
+def opt(loss, var1, var2):
+    opt = Adam(learning_rate = lr).minimize(loss, var_list = var1 + var2)
+    return opt
+
+
+
+"""_______________________________________________________vars_______________________________________________________"""
+lr = 0.02
+batch_size = 16
+epochs = 10
+input_dim = main.X_pca_rs.shape[0] * main.X_pca_rs.shape[1]
+nn_dim = 128
+z_dim = 10
+z_input = Input([None, z_dim], dtype=tf.float32, name="input_noise")
+x_input = Input([None, input_dim], dtype=tf.float32, name="real_noise")
+initializer = params(input_dim, nn_dim, z_dim)
+disc_W = initializer.get_disc_W()
+disc_B = initializer.get_disc_B()
+ae_W = initializer.get_ae_W()
+ae_B = initializer.get_ae_B()
+init_enc = Encoder(ae_W["enc_W_1"], ae_B["enc_B_1"])
+z_output = Model(inputs = x_input, outputs = init_enc(x_input))
+_, final_output = Decoder(z_output, ae_W["enc_W_1"], ae_B["enc_B_1"])
+real_output_disc = Discriminator(z_input, disc_W, disc_B)
+fake_output_disc = Discriminator(z_output, disc_W, disc_B)
+ae_loss = ae_loss
+disc_loss = disc_loss
+gen_loss = gen_loss
+enc_var = [ae_W["enc_W_1"], ae_B["enc_B_1"], ae_W["enc_W_2"], ae_B["enc_B_2"]]
+dec_var = [ae_W["dec_W_1"], ae_B["dec_B_1"], ae_W["dec_W_2"], ae_B["dec_B_2"]]
+disc_var = [disc_W["disc_1"], disc_W["disc_2"], disc_B["disc_1"], disc_B["disc_2"]]
+ae_opt = opt(ae_loss, enc_var, dec_var)
+disc_opt = opt(disc_loss, disc_var, 0)
+gen_opt = opt(gen_loss, enc_var, 0)
+
