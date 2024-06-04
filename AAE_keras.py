@@ -36,6 +36,7 @@ class params:
             "disc_2": Variable(init_function([self.nn_dim, 1]))
         }
 
+
     def init_disc_B(self):
         return {
             "disc_1": Variable(init_function([self.nn_dim])),
