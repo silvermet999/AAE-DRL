@@ -1,5 +1,4 @@
 """_________________________________________________import libraries_________________________________________________"""
-import numpy as np
 from tensorflow import Variable
 from tensorflow.keras.layers import Layer
 from tensorflow.keras.models import Model
@@ -42,7 +41,7 @@ class Encoder(Layer):
         return enc_output
 
 class Decoder(Layer):
-    def __init__(self, w1, w2, b1, b2):
+    def __init__(self, w1, b1, w2, b2):
         super(Decoder, self).__init__()
         self.w1 = w1
         self.w2 = w2
@@ -55,7 +54,7 @@ class Decoder(Layer):
         return prob, dec_output
 
 class Discriminator(Layer):
-    def __init__(self, w1, w2, b1, b2):
+    def __init__(self, w1, b1, w2, b2):
         super(Discriminator, self).__init__()
         self.w1 = w1
         self.w2 = w2
@@ -113,7 +112,7 @@ dec_B1 = biases(nn_dim)
 dec_B2 = biases(input_dim)
 
 z_output = Encoder(enc_W1, enc_B1, enc_W2, enc_B2)(x_input)
-_, final_output = Decoder(enc_W2, enc_B2, dec_W1, dec_B1)(z_output)
+_, final_output = Decoder(dec_W1, dec_B1, dec_W2, dec_B2)(z_output)
 real_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_input)
 fake_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_output)
 
