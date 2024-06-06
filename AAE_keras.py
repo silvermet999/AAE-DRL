@@ -2,8 +2,10 @@
 from tensorflow import Variable
 from tensorflow.keras.layers import Layer
 from tensorflow.keras.models import Model
-from tensorflow.nn import sigmoid, relu, sigmoid_cross_entropy_with_logits
+from tensorflow.nn import sigmoid, relu
+from tensorflow.keras.losses import BinaryCrossentropy, Loss
 from tensorflow.keras.optimizers import Adam
+from tensorflow.math import log
 from keras import Input
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -69,20 +71,14 @@ class Discriminator(Layer):
 
 
 """___________________________________________________loss and opt___________________________________________________"""
-def ae_loss():
-    ae_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(logits=final_output, labels=x_input))
-    return ae_loss
 
-def disc_loss():
-    disc_loss = -tf.reduce_mean(tf.log(real_output_disc) + tf.log(1 - fake_output_disc))
-    return disc_loss
 
-def gen_loss():
-    gen_loss = -tf.reduce_mean(tf.log(fake_output_disc))
-    return gen_loss
-
-def opt(loss, var1, var2):
-    opt = Adam(learning_rate = lr).minimize(loss, var_list = var1 + var2)
+def opt(n_loss, sel_var):
+    opt = Adam(learning_rate = lr)
+    with tf.GradientTape() as tape:
+        loss_value = n_loss()
+    gradients = tape.gradient(loss_value, sel_var)
+    opt.apply_gradients(zip(gradients, sel_var))
     return opt
 
 
@@ -116,15 +112,35 @@ _, final_output = Decoder(dec_W1, dec_B1, dec_W2, dec_B2)(z_output)
 real_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_input)
 fake_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_output)
 
-ae_loss = ae_loss
-disc_loss = disc_loss
-gen_loss = gen_loss
+# ae_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+# disc_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+# gen_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
 enc_var = [enc_W1, enc_B1, enc_W2, enc_B2]
 dec_var = [dec_W1, dec_B1, dec_W2, dec_B2]
 disc_var = [disc_W1, disc_W2, disc_B1, disc_B2]
+enc_dec_var = enc_var + dec_var
 
-ae_opt = opt(ae_loss, enc_var, dec_var)
-disc_opt = opt(disc_loss, disc_var, 0)
-gen_opt = opt(gen_loss, enc_var, 0)
+
+
+class disc_l(Loss):
+    def __init__(self, name="custom_gan_loss"):
+        super().__init__(name=name)
+    def call(self, real, fake):
+        real_loss = tf.math.log(tf.clip_by_value(real, 1e-10, 1.0))
+        fake_loss = tf.math.log(tf.clip_by_value(1.0 - fake, 1e-10, 1.0))
+        return -tf.reduce_mean(real_loss + fake_loss)
+
+ae_loss = BinaryCrossentropy(from_logits=True)
+# disc_loss = -tf.reduce_mean(log(tf.clip_by_value(real_output_disc, 1e-10, 1.0)) + log(tf.clip_by_value(1 - fake_output_disc, 1e-10, 1.0)))
+disc_loss = disc_l()(real_output_disc, fake_output_disc)
+
+
+
+
+# gen_loss = -tf.reduce_mean(log(tf.clip_by_value(fake_output_disc, 1e-10, 1.0)))
+#
+# ae_opt = opt(ae_loss, enc_dec_var)
+# disc_opt = opt(disc_loss, disc_var)
+# gen_opt = opt(gen_loss, enc_var)
 
