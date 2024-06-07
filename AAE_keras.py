@@ -1,146 +1,115 @@
 """_________________________________________________import libraries_________________________________________________"""
-from tensorflow import Variable
-from tensorflow.keras.layers import Layer
-from tensorflow.keras.models import Model
-from tensorflow.nn import sigmoid, relu
-from tensorflow.keras.losses import BinaryCrossentropy, Loss
+from tensorflow.keras.layers import (Input, Dense, Reshape, Flatten, Dropout, multiply, GaussianNoise,
+                                     BatchNormalization, Activation, Embedding, ZeroPadding2D, MaxPooling2D,
+                                     Lambda, LeakyReLU, UpSampling1D, Conv1D)
+from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.math import log
 from keras import Input
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import tensorflow.keras.backend as K
 import main
+import numpy as np
+import datetime
 
 
 
-
-"""______________________________________________________params______________________________________________________"""
-# normal dist
-def init_function(shape):
-    return tf.random.normal(shape, stddev=1 / tf.sqrt(shape[0] / 2))
-
-
-def weights(input_var, output_var):
-    w = Variable(init_function([input_var, output_var]))
-    return w
-
-def biases(input_var):
-    b = Variable(init_function([input_var]))
-    return b
-
-
+tf.debugging.set_log_device_placement(True)
 """______________________________________________________archi______________________________________________________"""
-class Encoder(Layer):
-    def __init__(self, w1, b1, w2, b2):
-        super(Encoder, self).__init__()
-        self.w1 = w1
-        self.w2 = w2
-        self.b1 = b1
-        self.b2 = b2
-    def call(self, x):
-        hidden_layer = relu(tf.add(tf.matmul(x, self.w1), self.b1))
-        enc_output = tf.add(tf.matmul(hidden_layer, self.w2), self.b2)
-        return enc_output
+class AdversarialAutoencoder():
+    def __init__(self):
+        self.input_vrt = 10
+        self.input_hzt = 53439
+        self.input_dim = (self.input_vrt, self.input_hzt)
+        self.nn_dim = 128
+        self.z_dim = 10
 
-class Decoder(Layer):
-    def __init__(self, w1, b1, w2, b2):
-        super(Decoder, self).__init__()
-        self.w1 = w1
-        self.w2 = w2
-        self.b1 = b1
-        self.b2 = b2
-    def call(self, x):
-        hidden_layer = relu(tf.add(tf.matmul(x, self.w1), self.b1))
-        dec_output = (tf.add(tf.matmul(hidden_layer, self.w2), self.b2))
-        prob = sigmoid(dec_output)
-        return prob, dec_output
+        optimizer = Adam(0.0002, 0.5)
+        self.discriminator = self.build_discriminator()
+        self.discriminator.compile(loss='binary_crossentropy',
+            optimizer=optimizer,
+            metrics=['loss'])
 
-class Discriminator(Layer):
-    def __init__(self, w1, b1, w2, b2):
-        super(Discriminator, self).__init__()
-        self.w1 = w1
-        self.w2 = w2
-        self.b1 = b1
-        self.b2 = b2
-    def call(self, x):
-        hidden_layer = relu(tf.add(tf.matmul(x, self.w1), self.b1))
-        final_output = (tf.add(tf.matmul(hidden_layer, self.w2), self.b2))
-        disc_output = sigmoid(final_output)
-        return disc_output
+        self.encoder = self.build_encoder()
+        self.decoder = self.build_decoder()
+
+        input = Input(shape=self.input_dim)
+        encoded_repr = self.encoder(input)
+        reconstructed_input = self.decoder(encoded_repr)
+
+        self.discriminator.trainable = False
+        validity = self.discriminator(encoded_repr)
+
+        self.adversarial_autoencoder = Model(input, [reconstructed_input, validity])
+        self.adversarial_autoencoder.compile(loss=['mse', 'binary_crossentropy'],
+            loss_weights=[0.999, 0.001],
+            optimizer=optimizer)
 
 
+    def build_encoder(self):
+        input = Input(shape=self.input_dim)
+        h = Flatten()(input)
+        h = Dense(512)(h)
+        h = LeakyReLU(alpha=0.2)(h)
+        h = Dense(512)(h)
+        h = LeakyReLU(alpha=0.2)(h)
+        mu = Dense(self.z_dim)(h)
+        log_var = Dense(self.z_dim)(h)
+        def sampling(args):
+            mu, log_var = args
+            batch = tf.shape(mu)[0]
+            dim = tf.shape(mu)[1]
+            epsilon = tf.random_normal(shape=(batch, dim))
+            return mu + K.exp(log_var / 2) * epsilon
+        latent_repr = Lambda(sampling, output_shape=(self.z_dim,))([h, mu, log_var])
+        enc_model = Model(input, latent_repr, name="encoder")
+        return enc_model
 
-"""___________________________________________________loss and opt___________________________________________________"""
+    def build_decoder(self):
+        dec_input = Input(shape=(self.z_dim,))
+        h = Dense(512)(dec_input)
+        h = LeakyReLU(alpha=0.2)(h)
+        h = Dense(512)(h)
+        h = LeakyReLU(alpha=0.2)(h)
+        h = Dense(np.prod(self.input_dim), activation='tanh')(h)
+        h = Reshape(self.input_dim)(h)
+
+        dec_model = Model(dec_input, h, name="decoder")
+        dec_model.summary()
+        return dec_model
+
+    def build_discriminator(self):
+        encoded_repr = Input(shape=(self.z_dim, ))
+        h = Dense(512, input_dim=self.z_dim)(encoded_repr)
+        h = LeakyReLU(alpha=0.2)(h)
+        h = Dense(256)(h)
+        h = LeakyReLU(alpha=0.2)(h)
+        h = Dense(1, activation="sigmoid")(h)
+        disc_model = Model(encoded_repr, h, name="discriminator")
+        disc_model.summary()
 
 
-def opt(n_loss, sel_var):
-    opt = Adam(learning_rate = lr)
-    with tf.GradientTape() as tape:
-        loss_value = n_loss()
-    gradients = tape.gradient(loss_value, sel_var)
-    opt.apply_gradients(zip(gradients, sel_var))
-    return opt
+        return disc_model
 
 
 
 """_______________________________________________________vars_______________________________________________________"""
-lr = 0.02
-batch_size = 16
-epochs = 10
-input_dim = main.X_pca_rs.shape[0] * main.X_pca_rs.shape[1]
-nn_dim = 128
-z_dim = 10
-
-z_input = Input([None, z_dim], dtype=tf.float32, name="input_noise")
-x_input = Input([None, input_dim], dtype=tf.float32, name="real_noise")
-
-disc_W1 = weights(z_dim, nn_dim)
-disc_W2 = weights(nn_dim, 1)
-disc_B1 = biases(nn_dim)
-disc_B2 = biases(1)
-enc_W1 = weights(input_dim, nn_dim)
-enc_W2 = weights(nn_dim, z_dim)
-dec_W1 = weights(z_dim, nn_dim)
-dec_W2 = weights(nn_dim, input_dim)
-enc_B1 = biases(nn_dim)
-enc_B2 = biases(z_dim)
-dec_B1 = biases(nn_dim)
-dec_B2 = biases(input_dim)
-
-z_output = Encoder(enc_W1, enc_B1, enc_W2, enc_B2)(x_input)
-_, final_output = Decoder(dec_W1, dec_B1, dec_W2, dec_B2)(z_output)
-real_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_input)
-fake_output_disc = Discriminator(disc_W1, disc_B2, disc_W2, disc_B2)(z_output)
-
-# ae_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-# disc_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-# gen_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-
-enc_var = [enc_W1, enc_B1, enc_W2, enc_B2]
-dec_var = [dec_W1, dec_B1, dec_W2, dec_B2]
-disc_var = [disc_W1, disc_W2, disc_B1, disc_B2]
-enc_dec_var = enc_var + dec_var
-
-
-
-class disc_l(Loss):
-    def __init__(self, name="custom_gan_loss"):
-        super().__init__(name=name)
-    def call(self, real, fake):
-        real_loss = tf.math.log(tf.clip_by_value(real, 1e-10, 1.0))
-        fake_loss = tf.math.log(tf.clip_by_value(1.0 - fake, 1e-10, 1.0))
-        return -tf.reduce_mean(real_loss + fake_loss)
-
-ae_loss = BinaryCrossentropy(from_logits=True)
-# disc_loss = -tf.reduce_mean(log(tf.clip_by_value(real_output_disc, 1e-10, 1.0)) + log(tf.clip_by_value(1 - fake_output_disc, 1e-10, 1.0)))
-disc_loss = disc_l()(real_output_disc, fake_output_disc)
-
-
-
-
-# gen_loss = -tf.reduce_mean(log(tf.clip_by_value(fake_output_disc, 1e-10, 1.0)))
+# lr = 0.02
+# batch_size = 16
+# epochs = 10
+# input_dim = main.X_pca_rs.shape[0] * main.X_pca_rs.shape[1]
+# nn_dim = 128
+# z_dim = 10
 #
-# ae_opt = opt(ae_loss, enc_dec_var)
-# disc_opt = opt(disc_loss, disc_var)
-# gen_opt = opt(gen_loss, enc_var)
+# z_input = Input([None, z_dim], dtype=tf.float32, name="input_noise")
+# x_input = Input([None, input_dim], dtype=tf.float32, name="real_noise")
 
+# ae = ae_model(z_output, final_output)
+# ae.compile(optimizer=Adam(), loss='mse', metrics=['loss'])
+# ae.fit(main.x_train, main.x_train, epoch=10, batch_size=6)
+AdversarialAutoencoder()
+
+
+
+log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
