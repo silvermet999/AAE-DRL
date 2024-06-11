@@ -6,16 +6,12 @@ import pandas as pd
 import math
 import itertools
 import torchvision.transforms as transforms
-from torch.autograd import Variable
-import torch.nn as nn
-import torch.nn.functional as F
 import torch
-from torch import Tensor
-from torch.utils.data import DataLoader
+import torch.nn as nn
+from torch import Tensor, cuda, exp
 from torchsummary import summary
 from torch.nn import parallel as par
 from torch import distributed as dist
-from torch.optim import Adam
 
 
 
@@ -33,19 +29,19 @@ parser.add_argument("--channels", type=int, default=1, help="number of input cha
 parser.add_argument("--sample_interval", type=int, default=400, help="interval between input sampling")
 opt = parser.parse_args()
 print(opt)
-cuda = True if torch.cuda.is_available() else False
+cuda = True if cuda.is_available() else False
 
-torch_gpu = torch.empty((20000, 20000)).cuda()
-torch.cuda.memory_allocated()
+# torch_gpu = torch.empty((20000, 20000)).cuda()
+# torch.cuda.memory_allocated()
 
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 # input_shape_rs = main.X_pca_rs.shape
 # input_shape_mas = main.X_pca_mas.shape
-df_sel = main.df.iloc[:1000, :10]
-input_shape_rs = (50,10)
-nn_dim = 512
+df_sel = main.df.iloc[:500, :100]
+input_shape_rs = 100
+nn_dim = 500
 z_dim = 10
 lr = 0.005
 
@@ -53,7 +49,7 @@ lr = 0.005
 
 """-----------------------------------------------------classes-----------------------------------------------------"""
 def reparameterization(mu, logvar):
-    std = torch.exp(logvar / 2)
+    std = exp(logvar / 2)
     """ 
     stockasticity :
     samples sampled_z from a standard normal distribution (np.random.normal(0, 1, ...)) with the same shape as mu; 
@@ -63,7 +59,7 @@ def reparameterization(mu, logvar):
     Backpropagation:
     sampled_z seperate from mu and logvar.
     """
-    sampled_z = Variable(Tensor(np.random.normal(0, 1, (mu.size(0), opt.z_dim))))
+    sampled_z = Tensor(np.random.normal(0, 1, (mu.size(0), opt.z_dim)))
     z = sampled_z * std + mu
     return z
 
@@ -74,10 +70,10 @@ class EncoderGenerator(nn.Module):
         super(EncoderGenerator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(int(np.prod(input_shape_rs)), 512),
+            nn.Linear(int(np.prod(input_shape_rs)), 500),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(500, 500),
+            nn.BatchNorm1d(500),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
@@ -87,9 +83,9 @@ class EncoderGenerator(nn.Module):
 
 
 # forward propagation
-    def forward(self, input):
+    def forward(self, input_flat):
         # view() flatten
-        input_flat = input.view(input.shape[0], -1)
+        # input_flat = input.view(input.shape[0], -1)
         x = self.model(input_flat)
         mu = self.mu(x)
         logvar = self.logvar(x)
@@ -104,17 +100,17 @@ class Decoder(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(opt.z_dim, nn_dim),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(500, 500),
+            nn.BatchNorm1d(500),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, int(np.prod(input_shape_rs))),
+            nn.Linear(500, int(np.prod(input_shape_rs))),
             nn.Tanh(),
         )
 
     def forward(self, z):
         input_flat = self.model(z)
-        input = input_flat.view(input_flat.shape[0], *input_shape_rs)
-        return input
+        # input = input_flat.view(input_flat.shape[0], *input_shape_rs)
+        return input_flat
 
 
 class Discriminator(nn.Module):
@@ -124,7 +120,7 @@ class Discriminator(nn.Module):
         self.model = nn.Sequential(
             nn.Linear(opt.z_dim, nn_dim),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
+            nn.Linear(500, 256),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(256, 1),
             nn.Sigmoid(),
@@ -136,103 +132,76 @@ class Discriminator(nn.Module):
 
 
 # Use binary cross-entropy loss
-adversarial_loss = torch.nn.BCELoss().cuda()
-pixelwise_loss = torch.nn.L1Loss().cuda()
+adversarial_loss = nn.BCELoss().cuda() if cuda else nn.BCELoss()
+pixelwise_loss = nn.L1Loss().cuda() if cuda else nn.L1Loss()
 
 
 
-encoder_generator = EncoderGenerator().cuda()
-decoder = Decoder().cuda()
-discriminator = Discriminator().cuda()
+encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
+decoder = Decoder().cuda() if cuda else Decoder()
+discriminator = Discriminator().cuda() if cuda else Discriminator()
+
 
 
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-Tensor = torch.cuda.FloatTensor
+Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 def sample_runs(n_row, batches_done):
     # Sample noise
-    z = Variable(Tensor(np.random.normal(0, 1, (n_row ** 2, opt.z_dim))))
+    z = Tensor(np.random.normal(0, 1, (n_row ** 2, opt.z_dim)))
     gen_input = decoder(z)
-    gen_data = gen_input.data.cuda().numpy()
+    gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
     df = pd.DataFrame(gen_data)
     df.to_csv(f"runs/{batches_done}.csv", index=False)
 
-# data_loader = DataLoader(df_sel, batch_size=6, shuffle=True)
+
+data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
+valid = torch.ones((data_tensor.shape[0], 1))
+fake = torch.zeros((data_tensor.shape[0], 1))
+
 
 for epoch in range(opt.n_epochs):
-    for i, row in enumerate(df_sel.iterrows()):
-        j = row[1][df_sel.columns]
-        j = torch.tensor(j, dtype=torch.int).cuda().unsqueeze(0)
+    # Configure input
+    real = data_tensor
+    optimizer_G.zero_grad()
 
-        # Adversarial ground truths
-        valid = torch.ones((j.shape[0], 1))
-        fake = torch.zeros((j.shape[0], 1))
+    encoded = encoder_generator(real)
+    decoded = decoder(encoded)
+    g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
+                decoded, real
+            )
 
-        # Configure input
-        real = j.to(dtype=torch.float)
+    g_loss.backward()
+    optimizer_G.step()
 
-        # -----------------
-        #  Train Generator
-        # -----------------
+    # ---------------------
+    #  Train Discriminator
+    # ---------------------
 
-        optimizer_G.zero_grad()
+    optimizer_D.zero_grad()
 
-        encoded = encoder_generator(real)
-        decoded = decoder(encoded)
+    # Sample noise as discriminator ground truth
+    z = Tensor(np.random.normal(0, 1, (data_tensor.shape[0], opt.z_dim)))
 
-        # Loss measures generator's ability to fool the discriminator
-        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
-            decoded, real
-        )
+    # Measure discriminator's ability to classify real from generated samples
+    real_loss = adversarial_loss(discriminator(z), valid)
+    fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
+    d_loss = 0.5 * (real_loss + fake_loss)
 
-        g_loss.backward()
-        optimizer_G.step()
+    d_loss.backward()
+    optimizer_D.step()
 
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
-
-        optimizer_D.zero_grad()
-
-        # Sample noise as discriminator ground truth
-        z = Variable(Tensor(np.random.normal(0, 1, (j.shape[0], opt.z_dim))))
-
-        # Measure discriminator's ability to classify real from generated samples
-        real_loss = adversarial_loss(discriminator(z), valid)
-        fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
-        d_loss = 0.5 * (real_loss + fake_loss)
-
-        d_loss.backward()
-        optimizer_D.step()
-
-        print(
-            "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
-            % (epoch, opt.n_epochs, i, len(df_sel), d_loss.item(), g_loss.item())
-        )
-
-        batches_done = epoch * len(df_sel) + i
-        if batches_done % opt.sample_interval == 0:
-            sample_runs(n_row=5, batches_done=batches_done)
-
-
-
-
-
-"""__________________________________________in case of more than one gpu__________________________________________"""
-def init_process():
-    dist.init_process_group(
-        backend='gloo',
-        init_method='tcp://127.0.0.1:9000',
-        rank=0,
-        world_size=1
+    print(
+        epoch, opt.n_epochs, len(df_sel), d_loss.item(), g_loss.item()
     )
 
-def main():
-    init_process()
-    par.DataParallel(encoder_generator)
-    dist.destroy_process_group()
+    batches_done = epoch * len(df_sel)
+    if batches_done % opt.sample_interval == 0:
+        sample_runs(n_row=5, batches_done=batches_done)
 
-if __name__ == '__main__':
-    main()
+
+
+
+
