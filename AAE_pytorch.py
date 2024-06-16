@@ -1,5 +1,6 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import main
+import dim_reduction
 from synthetic_data import SyntheticData
 import argparse
 import numpy as np
@@ -38,8 +39,8 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-# input_shape_rs = main.X_pca_rs.shape
-# input_shape_mas = main.X_pca_mas.shape
+# input_shape_rs = dim_reduction.X_pca_rs.shape
+# input_shape_mas = dim_reduction.X_pca_mas.shape
 df_sel = main.df.iloc[:1000, :100]
 in_out_rs = 1000 # in for the enc/gen out for the dec
 hl_dim = 150
@@ -78,6 +79,7 @@ class Residual(nn.Module):
         out = self.bn(out)
         out = self.relu(out)
         return torch.cat([out, input], dim=1)
+
 
 
 
@@ -303,7 +305,7 @@ class Synthesizer(SyntheticData):
 
     def fit(self, train_data, categorical_columns=tuple(), ordinal_columns=tuple()):
 
-        self.transformer = main.X_pca_rs
+        self.transformer = dim_reduction.x_pca_train
         self.transformer.fit(train_data, categorical_columns, ordinal_columns)
         train_data = self.transformer.transform(train_data)
 

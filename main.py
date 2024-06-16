@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import LabelEncoder, RobustScaler, MaxAbsScaler
-from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 
 
@@ -110,13 +109,5 @@ def max_abs_scaler(df):
 
 X_mas = max_abs_scaler(X)
 
-
-def PCA_alg(df):
-    pca = PCA(n_components=10)
-    df = pca.fit_transform(df)
-    return df
-
-X_pca_rs = PCA_alg(X_rs)
-X_pca_mas = PCA_alg(X_mas)
-
-x_train, x_test, y_train, y_test = train_test_split(X_pca_rs, y, test_size=0.2, random_state=42)
+x_train, x_test, y_train, y_test = train_test_split(X_rs, y, test_size=0.2, random_state=42)
+# x_train, x_test, y_train, y_test = train_test_split(X_mas, y, test_size=0.2, random_state=42)
