@@ -1,15 +1,15 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import main
+from synthetic_data import SyntheticData
 import argparse
 import numpy as np
 import pandas as pd
-import math
 import itertools
-import torchvision.transforms as transforms
 import torch
 from torch import nn
 from torch import Tensor, cuda, exp
 from torch.nn import functional as F
+from torch.optim import Adam
 from torchsummary import summary
 from torch.nn import parallel as par
 from torch import distributed as dist
@@ -41,8 +41,9 @@ cuda = True if cuda.is_available() else False
 # input_shape_rs = main.X_pca_rs.shape
 # input_shape_mas = main.X_pca_mas.shape
 df_sel = main.df.iloc[:1000, :100]
-input_shape_rs = 1000
-nn_dim = 100
+in_out_rs = 1000 # in for the enc/gen out for the dec
+hl_dim = 150
+out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
 lr = 0.005
 
@@ -82,25 +83,34 @@ class Residual(nn.Module):
 
 # module compatible with PyTorch
 class EncoderGenerator(nn.Module):
-    def __init__(self):
+    def __init__(self, in_dim, hl_dim, out_dim):
         super(EncoderGenerator, self).__init__()
+        seq = []
+        for item in list(hl_dim):
+            seq += [
+                Residual(in_dim, item)
+            ]
+            in_dim += item
 
-        self.model = nn.Sequential(
-            nn.Linear(input_shape_rs, 100),
+        add_layer = [
+            nn.Linear(in_dim, 100),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(100, 100),
             nn.BatchNorm1d(100),
             nn.LeakyReLU(0.2, inplace=True),
-        )
+            nn.Linear(100, out_dim)
+        ]
+        seq.extend(add_layer)
+        self.seq = nn.Sequential(*seq)
 
         # projects output to the dim of latent space
-        self.mu = nn.Linear(nn_dim, opt.z_dim)
-        self.logvar = nn.Linear(nn_dim, opt.z_dim)
+        self.mu = nn.Linear(out_dim, opt.z_dim)
+        self.logvar = nn.Linear(out_dim, opt.z_dim)
 
 
 # forward propagation
-    def forward(self, input_flat):
-        x = self.model(input_flat)
+    def forward(self, input_):
+        x = self.seq(input_)
         mu = self.mu(x)
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar)
@@ -108,56 +118,55 @@ class EncoderGenerator(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self):
+    def __init__(self, in_dim, hl_dim, out_dim):
         super(Decoder, self).__init__()
-
-        self.model = nn.Sequential(
-            nn.Linear(opt.z_dim, nn_dim),
+        seq = []
+        for item in list(hl_dim):
+            seq += [
+                Residual(in_dim, item)
+            ]
+            in_dim += item
+        add_layer = [
+            nn.Linear(opt.z_dim, in_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(100, 100),
             nn.BatchNorm1d(100),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(100, input_shape_rs),
+            nn.Linear(100, out_dim),
             nn.Tanh(),
-        )
+        ]
+        seq.extend(add_layer)
+        self.seq = nn.Sequential(*seq)
 
     def forward(self, z):
-        input_flat = self.model(z)
-        return input_flat
+        input_ = self.seq(z)
+        return input_
+
 
 
 class Discriminator(nn.Module):
-    def __init__(self, nn_dim, dim=10):
+    def __init__(self, in_dim, hl_dim, pack=10):
         super(Discriminator, self).__init__()
-        # dim =
-
-        # self.model = nn.Sequential(
-        #     nn.Linear(opt.z_dim, nn_dim),
-        #     nn.LeakyReLU(0.2, inplace=True),
-        #     nn.Linear(100, 256),
-        #     nn.LeakyReLU(0.2, inplace=True),
-        #     nn.Linear(256, 1),
-        #     nn.Sigmoid(),
-        # )
+        dim = in_dim * pack
+        self.pack = pack
+        self.packdim = dim
         seq = []
-        for i in list(nn_dim):
+        for i in list(hl_dim):
             seq += [
                 nn.Linear(opt.z_dim, i),
                 nn.LeakyReLU(0.2, inplace=True),
                 nn.Dropout(0.5),
                 nn.Linear(100, 256),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.Linear(256, 1),
-                nn.Sigmoid()
             ]
             dim = i
-        seq += [nn.Linear(dim, 1)]
+        seq += [nn.Linear(dim, 1),
+                nn.Sigmoid()]
         self.seq = nn.Sequential(*seq)
 
-    def forward(self, z):
-        validity = self.model(z)
-        return validity
-
+    def forward(self, input_):
+        assert input_.size()[0] % self.pack == 0
+        return self.seq(input_.view(-1, self.packdim))
 
 
 
@@ -167,81 +176,33 @@ def random_choice_prob_index(a, axis=1):
 
 
 
-
-
 class Cond(object):
     def __init__(self, data, output_info):
         self.model = []
 
         st = 0
-        skip = False
+        # skip = False
         max_interval = 0
         counter = 0
-        for item in output_info:
-            if item[1] == 'tanh':
-                st += item[0]
-                skip = True
-                continue
-            elif item[1] == 'softmax':
-                if skip:
-                    skip = False
-                    st += item[0]
-                    continue
-
-                ed = st + item[0]
-                max_interval = max(max_interval, ed - st)
-                counter += 1
-                self.model.append(np.argmax(data[:, st:ed], axis=-1))
-                st = ed
-            else:
-                assert 0
-        assert st == data.shape[1]
 
         self.interval = []
         self.n_col = 0
         self.n_opt = 0
-        skip = False
         st = 0
         self.p = np.zeros((counter, max_interval))
-        for item in output_info:
-            if item[1] == 'tanh':
-                skip = True
-                st += item[0]
-                continue
-            elif item[1] == 'softmax':
-                if skip:
-                    st += item[0]
-                    skip = False
-                    continue
-                ed = st + item[0]
-                tmp = np.sum(data[:, st:ed], axis=0)
-                tmp = np.log(tmp + 1)
-                tmp = tmp / np.sum(tmp)
-                self.p[self.n_col, :item[0]] = tmp
-                self.interval.append((self.n_opt, item[0]))
-                self.n_opt += item[0]
-                self.n_col += 1
-                st = ed
-            else:
-                assert 0
+        for i in output_info:
+            ed = st + i[0]
+            tmp = np.sum(data[:, st:ed], axis=0)
+            tmp = np.log(tmp + 1)
+            tmp = tmp / np.sum(tmp)
+            self.p[self.n_col, :i[0]] = tmp
+            self.interval.append((self.n_opt, i[0]))
+            self.n_opt += i[0]
+            self.n_col += 1
+            st = ed
         self.interval = np.asarray(self.interval)
 
-    def sample(self, batch):
-        if self.n_col == 0:
-            return None
-        batch = batch
-        idx = np.random.choice(np.arange(self.n_col), batch)
-
-        vec1 = np.zeros((batch, self.n_opt), dtype='float32')
-        mask1 = np.zeros((batch, self.n_col), dtype='float32')
-        mask1[np.arange(batch), idx] = 1
-        opt1prime = random_choice_prob_index(self.p[idx])
-        opt1 = self.interval[idx, 0] + opt1prime
-        vec1[np.arange(batch), opt1] = 1
-
-        return vec1, mask1, idx, opt1prime
-
-    def sample_zero(self, batch):
+    def sample_rand(self, batch):
         if self.n_col == 0:
             return None
         vec = np.zeros((batch, self.n_opt), dtype='float32')
@@ -260,119 +221,20 @@ def cond_loss(data, output_info, c, m):
     loss = []
     st = 0
     st_c = 0
-    skip = False
-    for item in output_info:
-        if item[1] == 'tanh':
-            st += item[0]
-            skip = True
-
-        elif item[1] == 'softmax':
-            if skip:
-                skip = False
-                st += item[0]
-                continue
-
-            ed = st + item[0]
-            ed_c = st_c + item[0]
-            tmp = F.binary_cross_entropy(
-                data[:, st:ed],
-                torch.argmax(c[:, st_c:ed_c], dim=1),
-                reduction='none'
-            )
-            loss.append(tmp)
-            st = ed
-            st_c = ed_c
-
-        else:
-            assert 0
+    for i in output_info:
+        ed = st + i[0]
+        ed_c = st_c + i[0]
+        tmp = F.cross_entropy(
+            data[:, st:ed],
+            torch.argmax(c[:, st_c:ed_c], dim=1),
+            reduction='none'
+        )
+        loss.append(tmp)
+        st = ed
+        st_c = ed_c
     loss = torch.stack(loss, dim=1)
 
     return (loss * m).sum() / data.size()[0]
-
-
-
-
-
-
-
-
-
-# Use binary cross-entropy loss
-adversarial_loss = nn.BCELoss().cuda() if cuda else nn.BCELoss()
-pixelwise_loss = nn.L1Loss().cuda() if cuda else nn.L1Loss()
-
-
-
-encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
-decoder = Decoder().cuda() if cuda else Decoder()
-discriminator = Discriminator().cuda() if cuda else Discriminator()
-
-
-
-optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
-def sample_runs(n_row, batches_done):
-    # Sample noise
-    z = Tensor(np.random.normal(0, 1, (n_row ** 2, opt.z_dim)))
-    gen_input = decoder(z)
-    gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
-    df = pd.DataFrame(gen_data)
-    df.to_csv(f"runs/{batches_done}.csv", index=False)
-
-
-data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
-valid = torch.ones((data_tensor.shape[0], 1))
-fake = torch.zeros((data_tensor.shape[0], 1))
-
-
-for epoch in range(opt.n_epochs):
-    # Configure input
-    real = data_tensor
-    optimizer_G.zero_grad()
-
-    encoded = encoder_generator(real)
-    decoded = decoder(encoded)
-    g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
-                decoded, real
-            )
-
-    g_loss.backward()
-    optimizer_G.step()
-
-    # ---------------------
-    #  Train Discriminator
-    # ---------------------
-
-    optimizer_D.zero_grad()
-
-    # Sample noise as discriminator ground truth
-    z = Tensor(np.random.normal(0, 1, (data_tensor.shape[0], opt.z_dim)))
-
-    # Measure discriminator's ability to classify real from generated samples
-    real_loss = adversarial_loss(discriminator(z), valid)
-    fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
-    d_loss = 0.5 * (real_loss + fake_loss)
-
-    d_loss.backward()
-    optimizer_D.step()
-
-    print(
-        epoch, opt.n_epochs, d_loss.item(), g_loss.item()
-    )
-
-    batches_done = epoch * len(df_sel)
-    if batches_done % opt.sample_interval == 0:
-        sample_runs(n_row=5, batches_done=batches_done)
-
-
-
-
-
-
-
 
 
 class Sampler(object):
@@ -385,24 +247,13 @@ class Sampler(object):
         self.n = len(data)
 
         st = 0
-        skip = False
         for item in output_info:
-            if item[1] == 'tanh':
-                st += item[0]
-                skip = True
-            elif item[1] == 'softmax':
-                if skip:
-                    skip = False
-                    st += item[0]
-                    continue
-                ed = st + item[0]
-                tmp = []
-                for j in range(item[0]):
-                    tmp.append(np.nonzero(data[:, st + j])[0])
-                self.model.append(tmp)
-                st = ed
-            else:
-                assert 0
+            ed = st + item[0]
+            tmp = []
+            for j in range(item[0]):
+                tmp.append(np.nonzero(data[:, st + j])[0])
+            self.model.append(tmp)
+            st = ed
         assert st == data.shape[1]
 
     def sample(self, n, col, opt):
@@ -415,7 +266,7 @@ class Sampler(object):
         return self.data[idx]
 
 
-def calc_gradient_penalty(netD, real_data, fake_data, device='cpu', pac=10, lambda_=10):
+def calc_gradient_penalty(netD, real_data, fake_data, device='gpu', pac=10, lambda_=10):
     alpha = torch.rand(real_data.size(0) // pac, 1, 1, device=device)
     alpha = alpha.repeat(1, pac, real_data.size(1))
     alpha = alpha.view(-1, real_data.size(1))
@@ -434,15 +285,14 @@ def calc_gradient_penalty(netD, real_data, fake_data, device='cpu', pac=10, lamb
     return gradient_penalty
 
 
-class CTGANSynthesizer(BaseSynthesizer):
+class Synthesizer(SyntheticData):
     def __init__(self,
                  dataset_name,
                  args=None):
 
         self.dataset_name = dataset_name
-        self.embedding_dim = args.embedding_dim
-        self.gen_dim = args.gen_dim
-        self.dis_dim = args.dis_dim
+        self.in_dim = args.in_dim
+        self.hl_dim = args.hl_dim
         self.lr = args.lr
 
         self.l2scale = args.l2scale
@@ -453,32 +303,38 @@ class CTGANSynthesizer(BaseSynthesizer):
 
     def fit(self, train_data, categorical_columns=tuple(), ordinal_columns=tuple()):
 
-        self.transformer = BGMTransformer()
+        self.transformer = main.X_pca_rs
         self.transformer.fit(train_data, categorical_columns, ordinal_columns)
         train_data = self.transformer.transform(train_data)
 
         data_sampler = Sampler(train_data, self.transformer.output_info)
-        data_dim = self.transformer.output_dim
-        self.cond_generator = Cond(train_data, self.transformer.output_info)
+        out_dim = self.transformer.output_dim
+        self.cond_enc_gen = Cond(train_data, self.transformer.output_info)
 
-        self.generator = Generator(
-            self.embedding_dim + self.cond_generator.n_opt,
-            self.gen_dim,
-            data_dim).to(self.device)
+        self.enc_gen = EncoderGenerator(
+            self.in_dim + self.cond_enc_gen.n_opt,
+            self.hl_dim,
+            out_dim)
+
+        self.dec = Decoder(
+            out_dim + self.cond_enc_gen.n_opt,
+            self.hl_dim,
+            self.in_dim)
 
         discriminator = Discriminator(
-            data_dim + self.cond_generator.n_opt,
-            self.dis_dim).to(self.device)
+            out_dim + self.cond_enc_gen.n_opt,
+            self.hl_dim)
 
-        optimizerG = optim.Adam(
-            self.generator.parameters(), lr=self.lr, betas=(0.5, 0.9), weight_decay=self.l2scale)
-        optimizerD = optim.Adam(discriminator.parameters(), lr=self.lr, betas=(0.5, 0.9))
+        optimizerEG = Adam(
+            self.enc_gen.parameters(), lr=self.lr, betas=(0.5, 0.9), weight_decay=self.l2scale)
+        # dec
+        optimizerD = Adam(discriminator.parameters(), lr=self.lr, betas=(0.5, 0.9))
 
         if len(train_data) <= self.batch_size:
             self.batch_size = (len(train_data) // 10) * 10
 
         assert self.batch_size % 2 == 0
-        mean = torch.zeros(self.batch_size, self.embedding_dim, device=self.device)
+        mean = torch.zeros(self.batch_size, self.in_dim, device=self.device)
         std = mean + 1
 
         steps_per_epoch = len(train_data) // self.batch_size
@@ -488,14 +344,14 @@ class CTGANSynthesizer(BaseSynthesizer):
             for id_ in range(steps_per_epoch):
                 fakez = torch.normal(mean=mean, std=std)
 
-                condvec = self.cond_generator.sample(self.batch_size)
+                condvec = self.cond_enc_gen.sample_rand(self.batch_size)
                 if condvec is None:
                     c1, m1, col, opt = None, None, None, None
                     real = data_sampler.sample(self.batch_size, col, opt)
                 else:
                     c1, m1, col, opt = condvec
-                    c1 = torch.from_numpy(c1).to(self.device)
-                    m1 = torch.from_numpy(m1).to(self.device)
+                    c1 = torch.from_numpy(c1)
+                    m1 = torch.from_numpy(m1)
                     fakez = torch.cat([fakez, c1], dim=1)
 
                     perm = np.arange(self.batch_size)
@@ -503,13 +359,12 @@ class CTGANSynthesizer(BaseSynthesizer):
                     real = data_sampler.sample(self.batch_size, col[perm], opt[perm])
                     c2 = c1[perm]
 
-                fake = self.generator(fakez)
-                fakeact = apply_activate(fake, self.transformer.output_info)
+                fake = self.enc_gen(fakez)
 
-                real = torch.from_numpy(real.astype('float32')).to(self.device)
+                real = torch.from_numpy(real.astype('float32'))
 
                 if c1 is not None:
-                    fake_cat = torch.cat([fakeact, c1], dim=1)
+                    fake_cat = torch.cat([fake, c1], dim=1)
                     real_cat = torch.cat([real, c2], dim=1)
                 else:
                     real_cat = real
@@ -519,7 +374,7 @@ class CTGANSynthesizer(BaseSynthesizer):
                 y_real = discriminator(real_cat)
 
                 loss_d = -torch.mean(y_real) + torch.mean(y_fake)
-                pen = calc_gradient_penalty(discriminator, real_cat, fake_cat, self.device)
+                pen = calc_gradient_penalty(discriminator, real_cat, fake_cat)
 
                 optimizerD.zero_grad()
                 pen.backward(retain_graph=True)
@@ -527,60 +382,136 @@ class CTGANSynthesizer(BaseSynthesizer):
                 optimizerD.step()
 
                 fakez = torch.normal(mean=mean, std=std)
-                condvec = self.cond_generator.sample(self.batch_size)
+                condvec = self.cond_enc_gen.sample_rand(self.batch_size)
 
                 if condvec is None:
                     c1, m1, col, opt = None, None, None, None
                 else:
                     c1, m1, col, opt = condvec
-                    c1 = torch.from_numpy(c1).to(self.device)
-                    m1 = torch.from_numpy(m1).to(self.device)
+                    c1 = torch.from_numpy(c1)
+                    m1 = torch.from_numpy(m1)
                     fakez = torch.cat([fakez, c1], dim=1)
 
-                fake = self.generator(fakez)
-                fakeact = apply_activate(fake, self.transformer.output_info)
+                fake = self.enc_gen(fakez)
+
+                recon_loss = F.mse_loss(fake, fakez)
 
                 if c1 is not None:
-                    y_fake = discriminator(torch.cat([fakeact, c1], dim=1))
+                    y_fake = discriminator(torch.cat([fake, c1], dim=1))
                 else:
-                    y_fake = discriminator(fakeact)
+                    y_fake = discriminator(fake)
 
                 if condvec is None:
                     cross_entropy = 0
                 else:
                     cross_entropy = cond_loss(fake, self.transformer.output_info, c1, m1)
 
-                loss_g = -torch.mean(y_fake) + cross_entropy
+                loss_eg = -torch.mean(y_fake) + recon_loss + cross_entropy
 
-                optimizerG.zero_grad()
-                loss_g.backward()
-                optimizerG.step()
+                optimizerEG.zero_grad()
+                loss_eg.backward()
+                optimizerEG.step()
 
     def sample(self, n):
 
-        self.generator.eval()
+        self.enc_gen.eval()
 
         output_info = self.transformer.output_info
         steps = n // self.batch_size + 1
         data = []
         for i in range(steps):
-            mean = torch.zeros(self.batch_size, self.embedding_dim)
+            mean = torch.zeros(self.batch_size, self.in_dim)
             std = mean + 1
-            fakez = torch.normal(mean=mean, std=std).to(self.device)
+            fakez = torch.normal(mean=mean, std=std)
 
-            condvec = self.cond_generator.sample_zero(self.batch_size)
+            condvec = self.cond_enc_gen.sample_rand(self.batch_size)
             if condvec is None:
                 pass
             else:
                 c1 = condvec
-                c1 = torch.from_numpy(c1).to(self.device)
+                c1 = torch.from_numpy(c1)
                 fakez = torch.cat([fakez, c1], dim=1)
 
-            fake = self.generator(fakez)
-            fakeact = apply_activate(fake, output_info)
-            data.append(fakeact.detach().cpu().numpy())
+            fake = self.enc_gen(fakez)
+            data.append(fake.detach().gpu().numpy())
 
         data = np.concatenate(data, axis=0)
         data = data[:n]
         return self.transformer.inverse_transform(data, None)
+
+
+
+
+
+
+# Use binary cross-entropy loss
+# adversarial_loss = nn.BCELoss().cuda() if cuda else nn.BCELoss()
+# pixelwise_loss = nn.L1Loss().cuda() if cuda else nn.L1Loss()
+# 
+# 
+# 
+# encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
+# decoder = Decoder().cuda() if cuda else Decoder()
+# discriminator = Discriminator().cuda() if cuda else Discriminator()
+# 
+# 
+# 
+# optimizer_G = torch.optim.Adam(
+#     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
+# optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+# Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+# 
+# def sample_runs(n_row, batches_done):
+#     # Sample noise
+#     z = Tensor(np.random.normal(0, 1, (n_row ** 2, opt.z_dim)))
+#     gen_input = decoder(z)
+#     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
+#     df = pd.DataFrame(gen_data)
+#     df.to_csv(f"runs/{batches_done}.csv", index=False)
+# 
+# 
+# data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
+# valid = torch.ones((data_tensor.shape[0], 1))
+# fake = torch.zeros((data_tensor.shape[0], 1))
+# 
+# 
+# for epoch in range(opt.n_epochs):
+#     # Configure input
+#     real = data_tensor
+#     optimizer_G.zero_grad()
+# 
+#     encoded = encoder_generator(real)
+#     decoded = decoder(encoded)
+#     g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
+#                 decoded, real
+#             )
+# 
+#     g_loss.backward()
+#     optimizer_G.step()
+# 
+#     # ---------------------
+#     #  Train Discriminator
+#     # ---------------------
+# 
+#     optimizer_D.zero_grad()
+# 
+#     # Sample noise as discriminator ground truth
+#     z = Tensor(np.random.normal(0, 1, (data_tensor.shape[0], opt.z_dim)))
+# 
+#     # Measure discriminator's ability to classify real from generated samples
+#     real_loss = adversarial_loss(discriminator(z), valid)
+#     fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
+#     d_loss = 0.5 * (real_loss + fake_loss)
+# 
+#     d_loss.backward()
+#     optimizer_D.step()
+# 
+#     print(
+#         epoch, opt.n_epochs, d_loss.item(), g_loss.item()
+#     )
+# 
+#     batches_done = epoch * len(df_sel)
+#     if batches_done % opt.sample_interval == 0:
+#         sample_runs(n_row=5, batches_done=batches_done)
+
 
