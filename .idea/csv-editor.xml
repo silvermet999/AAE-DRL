@@ -220,6 +220,20 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/runs/0.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/runs/2000.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/runs/4000.csv">
           <value>
             <Attribute>
