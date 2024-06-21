@@ -39,7 +39,7 @@ cuda = True if cuda.is_available() else False
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 df_sel = main.df.iloc[:5000, :100]
-in_out_rs = 5000 # in for the enc/gen out for the dec
+in_out_rs = 100 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
@@ -137,7 +137,6 @@ adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 pixelwise_loss = L1Loss().cuda() if cuda else L1Loss()
 
 
-
 encoder_generator = EncoderGenerator().cuda() if cuda else (
     EncoderGenerator())
 summary(encoder_generator, input_size=(in_out_rs,))
@@ -163,48 +162,65 @@ def sample_runs(n_row, z_dim, batches_done):
     df.to_csv(f"runs/{batches_done}.csv", index=False)
 
 
-data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
-valid = torch.ones((data_tensor.shape[0], 1))
-fake = torch.zeros((data_tensor.shape[0], 1))
-
+# data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
+# valid = torch.ones((data_tensor.shape[0], 1))
+# fake = torch.zeros((data_tensor.shape[0], 1))
 
 for epoch in range(10):
-    # Configure input
-    real = data_tensor.transpose(0,1)
-    optimizer_G.zero_grad()
+    n_batch = len(df_sel) // 6
+    for i in range(n_batch):
+        str_idx = i * 6
+        end_idx = str_idx + 6
+        batch_data = df_sel.iloc[str_idx:end_idx]
+        batch_tensor = torch.tensor(batch_data.values, dtype=torch.int).cuda() if cuda else torch.tensor(
+            batch_data.values, dtype=torch.int)
 
-    encoded = encoder_generator(real)
-    decoded = decoder(encoded)
-    g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
-                decoded, real
-            )
 
-    g_loss.backward()
-    optimizer_G.step()
+        valid = torch.ones((batch_tensor.shape[0], 1)).cuda() if cuda else torch.ones((batch_tensor.shape[0], 1))
+        fake = torch.zeros((batch_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((batch_tensor.shape[0], 1))
+        real = batch_tensor.to(dtype=torch.float)
+    #     j = row[1][df_sel.columns]
+    #     j = torch.tensor(j, dtype=torch.int).cuda().unsqueeze(0) if cuda else torch.tensor(j, dtype=torch.int).unsqueeze(0)
+    #     j = j.transpose(0,1)
+    #     valid = torch.ones((j.shape[0], 1))
+    #     fake = torch.zeros((j.shape[0], 1))
+    #     real = j.to(dtype=torch.float)
+    # # Configure input
+    # real = data_tensor.transpose(0,1)
+        optimizer_G.zero_grad()
 
-    optimizer_D.zero_grad()
+        encoded = encoder_generator(real)
+        decoded = decoder(encoded)
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
+                    decoded, real
+                )
 
-    # Sample noise as discriminator ground truth
-    z = Tensor(np.random.normal(0, 1, (data_tensor.shape[0], opt.z_dim)))
+        g_loss.backward()
+        optimizer_G.step()
 
-    # Measure discriminator's ability to classify real from generated samples
-    real_loss = adversarial_loss(discriminator(z), valid)
-    fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
-    d_loss = 0.5 * (real_loss + fake_loss)
+        optimizer_D.zero_grad()
 
-    d_loss.backward()
-    optimizer_D.step()
+        # Sample noise as discriminator ground truth
+        z = Tensor(np.random.normal(0, 1, (batch_tensor.shape[0], z_dim)))
 
-    print(
-        epoch, opt.n_epochs, d_loss.item(), g_loss.item()
-    )
+        # Measure discriminator's ability to classify real from generated samples
+        real_loss = adversarial_loss(discriminator(z), valid)
+        fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
+        d_loss = 0.5 * (real_loss + fake_loss)
 
-    batches_done = epoch * len(df_sel)
-    if batches_done % opt.sample_interval == 0:
-        sample_runs(n_row=71, z_dim=10, batches_done=1)
+        d_loss.backward()
+        optimizer_D.step()
 
-    real_data = data_tensor.cpu().numpy()
-    gen_data = decoded.detach().cpu().numpy()
-    classif.classifier(real_data, gen_data)
+        print(
+            epoch, opt.n_epochs, d_loss.item(), g_loss.item()
+        )
+
+        batches_done = epoch * len(df_sel)
+        if batches_done % opt.sample_interval == 0:
+            sample_runs(n_row=71, z_dim=10, batches_done=3)
+
+        real_data = df_sel.to_numpy()
+        gen_data = decoded.detach().numpy()
+        classif.classifier(real_data, gen_data)
 
 
