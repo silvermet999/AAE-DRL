@@ -1,7 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import main
 import dim_reduction
-import classif
+import clf
 from synthetic_data import SyntheticData
 import argparse
 import numpy as np
@@ -236,6 +236,6 @@ for epoch in range(10):
 
         real_data = df_sel.to_numpy()
         gen_data = decoded.detach().numpy()
-        classif.classifier(real_data, gen_data)
+        clf.classifier(real_data, gen_data)
 
 
