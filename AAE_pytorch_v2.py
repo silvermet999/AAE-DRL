@@ -8,10 +8,8 @@ import numpy as np
 import pandas as pd
 import itertools
 import torch
-from torch.nn import BatchNorm1d, Dropout, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid, BCELoss, L1Loss
+from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid, BCELoss, L1Loss
 from torch import Tensor, cuda, exp
-from torch.nn import functional as F
-from torch.optim import Adam
 from torchsummary import summary
 
 
@@ -41,6 +39,7 @@ cuda = True if cuda.is_available() else False
 df_sel = main.df.iloc[:5000, :100]
 in_out_rs = 100 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
+hl_dimd = (10, 10, 10, 10, 10)
 out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
 lr = 0.005
@@ -64,20 +63,33 @@ def reparameterization(mu, logvar, z_dim):
     return z
 
 
+class Residual(Module):
+    def __init__(self, i, o):
+        super(Residual, self).__init__()
+        self.fc1 = Linear(i, o)
+        self.leakyrelu1 = LeakyReLU(0.2)
+        self.bn = BatchNorm1d(o)
+        # self.fc2 = Linear(i, o)
+        # self.leakyrelu2 = LeakyReLU()
 
+    def forward(self, l0):
+        l1 = self.fc1(l0)
+        l2 = self.leakyrelu1(l1)
+        l3= self.bn(l2)
+        return torch.cat([l3, l0], dim=1)
 
 
 # module compatible with PyTorch
 class EncoderGenerator(Module):
     def __init__(self):
         super(EncoderGenerator, self).__init__()
-        self.model = Sequential(
-            Linear(in_out_rs, 100),
-            LeakyReLU(0.2, inplace=True),
-            Linear(100, 100),
-            BatchNorm1d(100),
-            LeakyReLU(0.2, inplace=True),
-        )
+        dim = in_out_rs
+        seq = []
+        for i in list(hl_dim):
+            seq += [Residual(dim, i)]
+            dim += i
+        seq.append(Linear(dim, out_in_dim))
+        self.seq = Sequential(*seq)
 
 
         # projects output to the dim of latent space
@@ -87,7 +99,7 @@ class EncoderGenerator(Module):
 
 # forward propagation
     def forward(self, input_):
-        x = self.model(input_)
+        x = self.seq(input_)
         mu = self.mu(x)
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar, z_dim)
@@ -114,20 +126,24 @@ class Decoder(Module):
 
 
 class Discriminator(Module):
-    def __init__(self):
+    def __init__(self, pack=10):
         super(Discriminator, self).__init__()
-        self.model = Sequential(
-            Linear(z_dim, 100),
-            LeakyReLU(0.2, inplace=True),
-            Linear(100, 50),
-            LeakyReLU(0.2, inplace=True),
-            Linear(50, 1),
-            Sigmoid(),
-        )
+        dim = z_dim * pack
+        self.pack = pack
+        self.packdim = dim
+        seq = []
+        for i in list(hl_dimd):
+            seq += [
+                Linear(z_dim, i),
+                LeakyReLU(0.2, inplace=True)
+            ]
+            dim = i
+        seq += [Linear(dim, 1), Sigmoid()]
+        self.seq = Sequential(*seq)
 
 
     def forward(self, input_):
-        return self.model(input_)
+        return self.seq(input_)
 
 
 
@@ -167,18 +183,17 @@ def sample_runs(n_row, z_dim, batches_done):
 # fake = torch.zeros((data_tensor.shape[0], 1))
 
 for epoch in range(10):
-    n_batch = len(df_sel) // 6
+    n_batch = len(df_sel) // 24
     for i in range(n_batch):
-        str_idx = i * 6
-        end_idx = str_idx + 6
+        str_idx = i * 24
+        end_idx = str_idx + 24
         batch_data = df_sel.iloc[str_idx:end_idx]
-        batch_tensor = torch.tensor(batch_data.values, dtype=torch.int).cuda() if cuda else torch.tensor(
-            batch_data.values, dtype=torch.int)
+        batch_tensor = torch.tensor(batch_data.values, dtype=torch.float).cuda() if cuda else torch.tensor(
+            batch_data.values, dtype=torch.float)
 
-
+        real = (batch_tensor - batch_tensor.mean()) / batch_tensor.std()
         valid = torch.ones((batch_tensor.shape[0], 1)).cuda() if cuda else torch.ones((batch_tensor.shape[0], 1))
         fake = torch.zeros((batch_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((batch_tensor.shape[0], 1))
-        real = batch_tensor.to(dtype=torch.float)
     #     j = row[1][df_sel.columns]
     #     j = torch.tensor(j, dtype=torch.int).cuda().unsqueeze(0) if cuda else torch.tensor(j, dtype=torch.int).unsqueeze(0)
     #     j = j.transpose(0,1)
