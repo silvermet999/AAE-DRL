@@ -1,20 +1,20 @@
                 precision    recall  f1-score   support
 
-        Adware       0.39      0.79      0.52      2187
-      Backdoor       0.67      0.01      0.02       220
+        Adware       0.33      0.71      0.45      2187
+      Backdoor       0.00      0.00      0.00       220
   FileInfector       0.00      0.00      0.00        45
-   No_Category       0.62      0.04      0.08       391
-           PUA       0.86      0.12      0.21       269
-    Ransomware       0.42      0.62      0.50       726
-      Riskware       0.77      0.71      0.74      2771
-     Scareware       0.66      0.27      0.38       184
-        Trojan       0.57      0.53      0.55      1694
+   No_Category       0.41      0.02      0.03       391
+           PUA       0.00      0.00      0.00       269
+    Ransomware       0.24      0.55      0.34       726
+      Riskware       0.60      0.72      0.65      2771
+     Scareware       0.00      0.00      0.00       184
+        Trojan       0.98      0.32      0.48      1694
  Trojan_Banker       0.00      0.00      0.00        48
-Trojan_Dropper       0.74      0.20      0.31       306
-    Trojan_SMS       0.58      0.08      0.14       366
-    Trojan_Spy       0.76      0.66      0.71       558
-      Zero_Day       0.33      0.07      0.12       923
+Trojan_Dropper       0.00      0.00      0.00       306
+    Trojan_SMS       0.50      0.00      0.01       366
+    Trojan_Spy       0.27      0.22      0.24       558
+      Zero_Day       0.00      0.00      0.00       923
 
-      accuracy                           0.53     10688
-     macro avg       0.53      0.29      0.30     10688
-  weighted avg       0.57      0.53      0.49     10688
+      accuracy                           0.43     10688
+     macro avg       0.24      0.18      0.16     10688
+  weighted avg       0.44      0.43      0.37     10688

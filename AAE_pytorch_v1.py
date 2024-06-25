@@ -1,7 +1,8 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import main
-import dim_reduction
 import clf
+import dim_reduction
+from sklearn.tree import DecisionTreeClassifier
 from synthetic_data import SyntheticData
 import argparse
 import numpy as np
@@ -18,7 +19,7 @@ from torchsummary import summary
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=10, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=12, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
+parser.add_argument("--lr", type=float, default=0.001, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
@@ -36,7 +37,8 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df_sel = main.X.iloc[:5000]
+df = pd.DataFrame(main.X_rs, columns=main.X.columns)
+df_sel = df.iloc[:5000]
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10)
@@ -51,14 +53,14 @@ def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
     """ 
     stockasticity :
-    samples sampled_z from a standard normal distribution (np.random.normal(0, 1, ...)) with the same shape as mu; 
+    samples sampled_z from a standard lognormal distribution (np.random.lognormal(0, 1, ...)) with the same shape as mu; 
     the mean of the distribution in the latent space.
     Instead of directly using the mean mu to represent the latent variable, the model samples from a distribution around mu.
     
     Backpropagation:
     sampled_z seperate from mu and logvar.
     """
-    sampled_z = Tensor(np.random.normal(0, 1, (mu.size(0), z_dim)))
+    sampled_z = Tensor(np.random.lognormal(0, 1, (mu.size(0), z_dim)))
     z = sampled_z * std + mu
     return z
 
@@ -69,8 +71,6 @@ class Residual(Module):
         self.fc1 = Linear(i, o)
         self.leakyrelu1 = LeakyReLU(0.2)
         self.bn = BatchNorm1d(o)
-        # self.fc2 = Linear(i, o)
-        # self.leakyrelu2 = LeakyReLU()
 
     def forward(self, l0):
         l1 = self.fc1(l0)
@@ -134,8 +134,8 @@ class Discriminator(Module):
             seq += [
                 Linear(z_dim, i),
                 LeakyReLU(0.2, inplace=True),
-                Linear(10, i),
-                LeakyReLU(0.2, inplace=True)
+                Linear(10, 10),
+                LeakyReLU(0.2, inplace=True),
             ]
             dim = i
         seq += [Linear(dim, 1), Sigmoid()]
@@ -150,7 +150,7 @@ class Discriminator(Module):
 
 # Use binary cross-entropy loss
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
-pixelwise_loss = L1Loss().cuda() if cuda else L1Loss()
+recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
 
 encoder_generator = EncoderGenerator().cuda() if cuda else (
@@ -171,18 +171,16 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 def sample_runs(n_row, z_dim, batches_done):
     # Sample noise
-    z = Tensor(np.random.normal(0, 1, (n_row ** 2, z_dim)))
+    z = Tensor(np.random.lognormal(0, 1, (n_row ** 2, z_dim)))
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
     df = pd.DataFrame(gen_data)
     df.to_csv(f"runs/{batches_done}.csv", index=False)
 
 
-# data_tensor = torch.tensor(df_sel.values, dtype=torch.float)
-# valid = torch.ones((data_tensor.shape[0], 1))
-# fake = torch.zeros((data_tensor.shape[0], 1))
 
-for epoch in range(10):
+
+for epoch in range(1):
     n_batch = len(df_sel) // 24
     for i in range(n_batch):
         str_idx = i * 24
@@ -198,7 +196,7 @@ for epoch in range(10):
 
         encoded = encoder_generator(real)
         decoded = decoder(encoded)
-        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * pixelwise_loss(
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(
                     decoded, real
                 )
 
@@ -208,9 +206,10 @@ for epoch in range(10):
         optimizer_D.zero_grad()
 
         # Sample noise as discriminator ground truth
-        z = Tensor(np.random.normal(0, 1, (batch_tensor.shape[0], z_dim)))
+        z = Tensor(np.random.lognormal(0, 1, (batch_tensor.shape[0], z_dim)))
 
-        # Measure discriminator's ability to classify real from generated samples
+        # real and fake loss should be close
+        # discriminator(z) should be close to 0
         real_loss = adversarial_loss(discriminator(z), valid)
         fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
         d_loss = 0.5 * (real_loss + fake_loss)
@@ -218,16 +217,15 @@ for epoch in range(10):
         d_loss.backward()
         optimizer_D.step()
 
-        print(
-            epoch, opt.n_epochs, d_loss.item(), g_loss.item()
-        )
+        print(epoch, opt.n_epochs, d_loss.item(), g_loss.item())
 
         batches_done = epoch * len(df_sel)
         if batches_done % opt.sample_interval == 0:
             sample_runs(n_row=71, z_dim=10, batches_done=3)
 
-        real_data = df_sel.to_numpy()
-        gen_data = decoded.detach().numpy()
-        clf.classifier(real_data, gen_data)
+    print(clf.classifier())
+
+
+
 
 
