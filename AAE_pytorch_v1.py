@@ -223,7 +223,7 @@ for epoch in range(1):
         if batches_done % opt.sample_interval == 0:
             sample_runs(n_row=71, z_dim=10, batches_done=3)
 
-    print(clf.classifier())
+    # print(clf.classifier())
 
 
 

@@ -5,17 +5,13 @@ from sklearn import tree
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, IsolationForest
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import classification_report
+from sklearn.preprocessing import LabelEncoder
 import dim_reduction
 import main
 from scipy.stats import mode
 
 
-ad = AdaBoostClassifier()
-gbc = GradientBoostingClassifier()
-iso = IsolationForest()
-svm = SVC()
-xgbc = XGBClassifier()
 
 
 def classifier():
@@ -27,7 +23,45 @@ def classifier():
     plt.savefig('tree.png')
     with open('classification_report.txt', 'w') as f:
         f.write(class_report)
+    return pred, graph, class_report
+
+
+
+def adaboost():
+    base_estimator = tree.DecisionTreeClassifier(max_depth=1)
+    clf = AdaBoostClassifier(base_estimator, n_estimators=100, algorithm='SAMME', random_state=42)
+    clf = clf.fit(main.x_train, main.y_train.iloc[:, 0])
+    pred = clf.predict(main.x_test)
+    class_report = classification_report(main.y_test.iloc[:10688, 0], pred)
+    with open('ada_classification_report.txt', 'w') as f:
+        f.write(class_report)
+
     return pred, class_report
 
-clf_pred, class_report = classifier()
-print(clf_pred)
+
+
+def gbc():
+    clf = GradientBoostingClassifier(n_estimators=100, random_state=42)
+    clf = clf.fit(main.x_train, main.y_train.iloc[:, 0])
+    pred = clf.predict(main.x_test)
+    class_report = classification_report(main.y_test.iloc[:10688, 0], pred)
+    with open('gbc_classification_report.txt', 'w') as f:
+        f.write(class_report)
+    return pred, class_report
+
+
+
+
+
+le = LabelEncoder()
+y_train = le.fit_transform(main.y_train["Category"])
+y_test = le.fit_transform(main.y_test["Category"])
+
+def xgb():
+    clf = XGBClassifier(n_estimators=2, max_depth=2, learning_rate=1, objective='multi:softmax', n_class = 14)
+    clf.fit(main.x_train, y_train)
+    pred = clf.predict(main.x_test)
+    class_report = classification_report(y_test[:10688], pred)
+    with open('xgb_classification_report.txt', 'w') as f:
+        f.write(class_report)
+    return pred, class_report
