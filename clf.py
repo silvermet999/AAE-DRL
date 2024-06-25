@@ -41,7 +41,7 @@ def adaboost():
 
 
 def gbc():
-    clf = GradientBoostingClassifier(n_estimators=100, random_state=42)
+    clf = GradientBoostingClassifier(n_estimators=10, random_state=42)
     clf = clf.fit(main.x_train, main.y_train.iloc[:, 0])
     pred = clf.predict(main.x_test)
     class_report = classification_report(main.y_test.iloc[:10688, 0], pred)
