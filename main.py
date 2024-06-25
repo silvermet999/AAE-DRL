@@ -41,6 +41,12 @@ process_col = df["Process_total"]
 
 
 """-----------------------------------------------data viz-----------------------------------------------"""
+encoder = LabelEncoder()
+df_enc = df.copy()
+cols = ["Category", "Family", "Before_or_After_Reboot", "Hash"]
+for i in cols:
+    df_enc[i] = encoder.fit_transform(df[i])
+
 def histogram_plot(data, features):
     for i in features:
         plt.figure(figsize=(10, 10))
@@ -65,13 +71,10 @@ def multivariate_analysis(data_col):
                        col_wrap=2, palette="muted", ci=None, height=4, scatter_kws={"s": 50, "alpha": 1})
 
 
-encoder = LabelEncoder()
-cols = ["Category", "Family", "Before_or_After_Reboot", "Hash"]
-for i in cols:
-    df[i] = encoder.fit_transform(df[i])
 
 
-correlation = df.corr()
+
+correlation = df_enc.corr()
 f_corr = {}
 for column in correlation.columns:
     correlated_with = list(correlation.index[(correlation[column] >= 0.75) | (correlation[column] <= -0.75)])
@@ -88,6 +91,8 @@ f_corr = f_corr.drop_duplicates()
 
 """-----------------------------------------------vertical data split-----------------------------------------------"""
 y = df[["Category", "Family", "Before_or_After_Reboot"]]
+
+df["Hash"] = encoder.fit_transform(df["Hash"])
 X = df.drop(y, axis = 1)
 
 
