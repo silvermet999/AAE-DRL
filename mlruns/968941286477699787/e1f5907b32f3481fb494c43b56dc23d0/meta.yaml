@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/e1f5907b32f3481fb494c43b56dc23d0/artifacts
+end_time: 1719349137209
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: e1f5907b32f3481fb494c43b56dc23d0
+run_name: capable-ant-810
+run_uuid: e1f5907b32f3481fb494c43b56dc23d0
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719349133987
+status: 3
+tags: []
+user_id: silver

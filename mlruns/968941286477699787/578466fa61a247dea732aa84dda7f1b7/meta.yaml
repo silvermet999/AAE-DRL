@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/578466fa61a247dea732aa84dda7f1b7/artifacts
+end_time: 1719348964887
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: 578466fa61a247dea732aa84dda7f1b7
+run_name: mercurial-frog-626
+run_uuid: 578466fa61a247dea732aa84dda7f1b7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719348964865
+status: 4
+tags: []
+user_id: silver

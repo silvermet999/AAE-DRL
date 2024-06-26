@@ -1,0 +1,16 @@
+artifact_path: mlflow/discriminator
+flavors:
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.4.2
+mlflow_version: 2.14.1
+model_size_bytes: 16469
+model_uuid: 0eaa7f0b85524549bdcf342850411e77
+run_id: aacc4316ef7f416b99c2a21156e8c82e
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: values
+  type: dataframe
+utc_time_created: '2024-06-25 21:06:46.201015'

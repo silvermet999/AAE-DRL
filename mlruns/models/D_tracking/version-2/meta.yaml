@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1719420836633
+current_stage: None
+description: ''
+last_updated_timestamp: 1719420836633
+name: D_tracking
+run_id: e21921da8d144c9188a9c0a0db6ff443
+run_link: ''
+source: mlflow-artifacts:/968941286477699787/e21921da8d144c9188a9c0a0db6ff443/artifacts/mlflow/discriminator
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/968941286477699787/e21921da8d144c9188a9c0a0db6ff443/artifacts/mlflow/discriminator
+user_id: null
+version: 2

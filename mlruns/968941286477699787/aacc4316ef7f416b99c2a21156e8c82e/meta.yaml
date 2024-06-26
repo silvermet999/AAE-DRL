@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/aacc4316ef7f416b99c2a21156e8c82e/artifacts
+end_time: 1719349608398
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: aacc4316ef7f416b99c2a21156e8c82e
+run_name: melodic-conch-271
+run_uuid: aacc4316ef7f416b99c2a21156e8c82e
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719349603469
+status: 3
+tags: []
+user_id: silver

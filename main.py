@@ -86,6 +86,10 @@ f_corr = pd.DataFrame.from_dict(f_corr, orient="index")
 f_corr = f_corr.drop_duplicates()
 # f_corr.to_csv("f_corr.csv")
 
+columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
+df = df.drop(columns=columns_to_drop)
+
+
 
 
 

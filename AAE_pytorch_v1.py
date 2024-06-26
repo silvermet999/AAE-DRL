@@ -1,7 +1,9 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
+from torch.optim.lr_scheduler import ExponentialLR, MultiStepLR
+
+import dim_reduction
 import main
 import clf
-import dim_reduction
 from sklearn.tree import DecisionTreeClassifier
 from synthetic_data import SyntheticData
 import argparse
@@ -12,6 +14,7 @@ import torch
 from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid, BCELoss, L1Loss
 from torch import Tensor, cuda, exp
 from torchsummary import summary
+import mlflow
 
 
 
@@ -37,18 +40,23 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df = pd.DataFrame(main.X_rs, columns=main.X.columns)
-df_sel = df.iloc[:5000]
-in_out_rs = 127 # in for the enc/gen out for the dec
+df_sel = dim_reduction.x_pca_train[:5000]
+in_out_rs = 100 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10)
-out_in_dim = 100 # in for the dec and disc out for the enc/gen
+out_in_dim = 40 # in for the dec and disc out for the enc/gen
 z_dim = 10
-lr = 0.005
+params = {
+    "lr": 0.01,
+    "batch_size": 24,
+    "n_epochs": 100,
+    "optimizer": "Adam",
+    "gamma": 0.9
+}
 
 
 
-"""-----------------------------------------------------classes-----------------------------------------------------"""
+"""---------------------------------------------backprop and hidden layers-------------------------------------------"""
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
     """ 
@@ -79,6 +87,8 @@ class Residual(Module):
         return torch.cat([l3, l0], dim=1)
 
 
+
+"""----------------------------------------------------AAE blocks----------------------------------------------------"""
 # module compatible with PyTorch
 class EncoderGenerator(Module):
     def __init__(self):
@@ -147,7 +157,7 @@ class Discriminator(Module):
 
 
 
-
+"""--------------------------------------------------loss and optim--------------------------------------------------"""
 # Use binary cross-entropy loss
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
@@ -162,32 +172,36 @@ discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
 
-
-
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+scheduler_D = ExponentialLR(optimizer_D, gamma=0.9)
+scheduler_G = MultiStepLR(optimizer_G, milestones=[30,80], gamma=0.1)
+
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
+
+
+"""-----------------------------------------------------data gen-----------------------------------------------------"""
 def sample_runs(n_row, z_dim, batches_done):
     # Sample noise
     z = Tensor(np.random.lognormal(0, 1, (n_row ** 2, z_dim)))
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
-    df = pd.DataFrame(gen_data)
-    df.to_csv(f"runs/{batches_done}.csv", index=False)
+    dim_reduction.x_pca_train = pd.DataFrame(gen_data)
+    dim_reduction.x_pca_train.to_csv(f"runs/{batches_done}.csv", index=False)
 
 
 
-
-for epoch in range(1):
+"""--------------------------------------------------model training--------------------------------------------------"""
+for epoch in range(10):
     n_batch = len(df_sel) // 24
     for i in range(n_batch):
         str_idx = i * 24
         end_idx = str_idx + 24
-        batch_data = df_sel.iloc[str_idx:end_idx]
-        batch_tensor = torch.tensor(batch_data.values, dtype=torch.float).cuda() if cuda else torch.tensor(
-            batch_data.values, dtype=torch.float)
+        batch_data = df_sel[str_idx:end_idx]
+        batch_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
+            batch_data, dtype=torch.float)
 
         real = (batch_tensor - batch_tensor.mean()) / batch_tensor.std()
         valid = torch.ones((batch_tensor.shape[0], 1)).cuda() if cuda else torch.ones((batch_tensor.shape[0], 1))
@@ -217,13 +231,15 @@ for epoch in range(1):
         d_loss.backward()
         optimizer_D.step()
 
+        scheduler_G.step()
+        scheduler_D.step()
         print(epoch, opt.n_epochs, d_loss.item(), g_loss.item())
 
         batches_done = epoch * len(df_sel)
         if batches_done % opt.sample_interval == 0:
             sample_runs(n_row=71, z_dim=10, batches_done=3)
 
-    # print(clf.classifier())
+    print(clf.xgb())
 
 
 

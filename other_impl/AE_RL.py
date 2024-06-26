@@ -3,7 +3,7 @@ from torch.nn import Module, Sequential, Linear, ReLU
 
 
 class RandomSampler():
-    def __init__(self, n):
+    def __init__(self):
         super(RandomSampler, self).__init__()
         pass
 
@@ -12,7 +12,7 @@ class AgentClf(Module):
     def __init__(self):
         super(AgentClf, self).__init__()
         self.model = Sequential(
-            Linear(122, 100),
+            Linear(127, 100),
             ReLU(),
             Linear(100, 100),
             ReLU(),
@@ -32,7 +32,7 @@ class AgentEnv(Module):
     def __init__(self):
         super(AgentEnv, self).__init__()
         self.model = Sequential(
-            Linear(122, 100),
+            Linear(127, 100),
             ReLU(),
             Linear(100, 23),
             ReLU()
@@ -40,3 +40,4 @@ class AgentEnv(Module):
         )
     def forward(self, x):
         return self.model(x)
+
