@@ -7,12 +7,15 @@ from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from imblearn.pipeline import Pipeline
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+from sklearn.metrics import recall_score
 
 from sklearn.svm import SVC
 import xgboost
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import LabelEncoder
 from imblearn.over_sampling import SMOTE
+from sklearn.utils import compute_sample_weight
 
 import dim_reduction
 import main
@@ -85,10 +88,11 @@ dtest = xgboost.DMatrix(main.x_test, label=y_test)
 
 
 def xgb_bscv():
-    smote = SMOTE(random_state=42)
-    clf = xgboost.XGBClassifier(n_estimators=14, max_depth=5, gamma=0.1, reg_alpha=1.0,
+    smote = SMOTE(sampling_strategy='auto', random_state=42)
+    X_res, y_res = smote.fit_resample(main.x_train, y_train)
+    clf = xgboost.XGBClassifier(n_estimators=20, max_depth=10, gamma=0.1, reg_alpha=1.0,
                             reg_lambda=1.0, learning_rate=0.1, objective='multi:softmax',
-                            n_class=14)
+                            num_class=14)
 
     opt = BayesSearchCV(
         clf,
@@ -107,16 +111,80 @@ def xgb_bscv():
 
     pipeline = Pipeline([('smote', smote), ('opt', opt)])
 
-    pipeline.fit(main.x_train, y_train)
+    pipeline.fit(X_res, y_res)
     pred = pipeline.predict(main.x_test)
     class_report = classification_report(y_test[:10688], pred)
 
-    with open('xgb_bscv_smote_classification_report.txt', 'w') as f:
+    with open('xgb_bscv_smote_tweek_classification_report.txt', 'w') as f:
         f.write(class_report)
 
     return pred, class_report
 
 
+space = {
+    'max_depth': hp.quniform("max_depth", 3, 18, 1),
+    'gamma': hp.uniform('gamma', 0, 10),
+    'learning_rate': hp.uniform('learning_rate', 0.01, 0.3),
+    'reg_alpha': hp.quniform('reg_alpha', 0, 180, 1),
+    'reg_lambda': hp.uniform('reg_lambda', 0, 1),
+    'colsample_bytree': hp.uniform('colsample_bytree', 0.5, 1),
+    'min_child_weight': hp.quniform('min_child_weight', 0, 10, 1),
+    'n_estimators': 180,
+    'seed': 0
+}
+
+# Compute class weights
+class_weights = compute_sample_weight('balanced', y_train)
 
 
+# Define the objective function
+def objective():
+    clf = xgboost.XGBClassifier(
+        max_depth=16,
+        gamma=.014,
+        learning_rate=.02,
+        reg_alpha=3,
+        reg_lambda=.75,
+        colsample_bytree=.64,
+        min_child_weight=2,
+        n_estimators=180,
+        seed=0,
+        objective='multi:softmax',
+        num_class=14
+    )
 
+    clf.fit(main.x_train, y_train, sample_weight=class_weights)
+    pred = clf.predict(main.x_test)
+    recall = recall_score(y_test[:10688], pred, average='macro')
+
+    return recall
+
+trials = Trials()
+best = fmin(fn=objective,
+            space=space,
+            algo=tpe.suggest,
+            max_evals=100,
+            trials=trials)
+
+
+# Train the final model with the best hyperparameters
+best_model = xgboost.XGBClassifier(
+    max_depth=int(best['max_depth']),
+    gamma=best['gamma'],
+    learning_rate=best['learning_rate'],
+    reg_alpha=int(best['reg_alpha']),
+    reg_lambda=best['reg_lambda'],
+    colsample_bytree=best['colsample_bytree'],
+    min_child_weight=int(best['min_child_weight']),
+    n_estimators=best['n_estimators'],
+    seed=best['seed'],
+    objective='multi:softmax',
+    num_class=14
+)
+
+best_model.fit(main.x_train, y_train, sample_weight=class_weights)
+pred = best_model.predict(main.x_test)
+class_report = classification_report(y_test[:10688], pred)
+
+with open('xgb_hyperopt_classification_report.txt', 'w') as f:
+    f.write(class_report)
