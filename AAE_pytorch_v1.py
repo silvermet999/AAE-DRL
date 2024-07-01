@@ -1,11 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
-from torch.optim.lr_scheduler import ExponentialLR, MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 import dim_reduction
-import main
-import clf
-from sklearn.tree import DecisionTreeClassifier
-from synthetic_data import SyntheticData
 import argparse
 import numpy as np
 import pandas as pd
@@ -73,9 +69,9 @@ def reparameterization(mu, logvar, z_dim):
     return z
 
 
-class Residual(Module):
+class hl_loop(Module):
     def __init__(self, i, o):
-        super(Residual, self).__init__()
+        super(hl_loop, self).__init__()
         self.fc1 = Linear(i, o)
         self.leakyrelu1 = LeakyReLU(0.2)
         self.bn = BatchNorm1d(o)
@@ -96,7 +92,7 @@ class EncoderGenerator(Module):
         dim = in_out_rs
         seq = []
         for i in list(hl_dim):
-            seq += [Residual(dim, i)]
+            seq += [hl_loop(dim, i)]
             dim += i
         seq.append(Linear(dim, out_in_dim))
         self.seq = Sequential(*seq)
@@ -122,7 +118,7 @@ class Decoder(Module):
         dim = z_dim
         seq = []
         for i in list(hl_dim):
-            seq += [Residual(dim, i)]
+            seq += [hl_loop(dim, i)]
             dim += i
         seq += [Linear(dim, in_out_rs), Tanh()]
         self.seq = Sequential(*seq)
@@ -175,7 +171,7 @@ summary(discriminator, input_size=(z_dim,))
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-scheduler_D = ExponentialLR(optimizer_D, gamma=0.9)
+scheduler_D = MultiStepLR(optimizer_G, milestones=[30,80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30,80], gamma=0.1)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -184,7 +180,6 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
 def sample_runs(n_row, z_dim, batches_done):
-    # Sample noise
     z = Tensor(np.random.lognormal(0, 1, (n_row ** 2, z_dim)))
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
@@ -194,7 +189,7 @@ def sample_runs(n_row, z_dim, batches_done):
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
-for epoch in range(10):
+for epoch in range(100):
     n_batch = len(df_sel) // 24
     for i in range(n_batch):
         str_idx = i * 24
@@ -231,15 +226,15 @@ for epoch in range(10):
         d_loss.backward()
         optimizer_D.step()
 
-        scheduler_G.step()
-        scheduler_D.step()
-        print(epoch, opt.n_epochs, d_loss.item(), g_loss.item())
+    scheduler_G.step()
+    scheduler_D.step()
+    print(epoch, opt.n_epochs, d_loss.item(), g_loss.item())
 
-        batches_done = epoch * len(df_sel)
-        if batches_done % opt.sample_interval == 0:
-            sample_runs(n_row=71, z_dim=10, batches_done=3)
+    batches_done = epoch * len(df_sel)
+    if batches_done % opt.sample_interval == 0:
+        sample_runs(n_row=71, z_dim=10, batches_done=3)
 
-    print(clf.xgb())
+    # print(clf.xgb())
 
 
 

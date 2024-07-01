@@ -1,5 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
+from scipy import stats
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -89,6 +91,13 @@ f_corr = f_corr.drop_duplicates()
 columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
 df = df.drop(columns=columns_to_drop)
 
+
+def remove_outliers_zscore(df, threshold=3):
+    z_scores = np.abs(stats.zscore(df))
+    df_cleaned = df[(z_scores < threshold).all(axis=1)]
+    return df_cleaned
+
+df = remove_outliers_zscore(df_enc)
 
 
 

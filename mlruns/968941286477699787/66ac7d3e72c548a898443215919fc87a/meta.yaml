@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/66ac7d3e72c548a898443215919fc87a/artifacts
+deleted_time: 1719436486616
+end_time: 1719436419309
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: deleted
+run_id: 66ac7d3e72c548a898443215919fc87a
+run_name: sincere-ram-39
+run_uuid: 66ac7d3e72c548a898443215919fc87a
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719436419299
+status: 4
+tags: []
+user_id: silver

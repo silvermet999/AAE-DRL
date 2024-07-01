@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/7163a0e09e224d8fa163d30adcfb50c8/artifacts
+end_time: 1719436454833
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: 7163a0e09e224d8fa163d30adcfb50c8
+run_name: 100 epochs
+run_uuid: 7163a0e09e224d8fa163d30adcfb50c8
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719436449281
+status: 3
+tags: []
+user_id: silver
