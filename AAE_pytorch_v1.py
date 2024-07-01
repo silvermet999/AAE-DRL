@@ -176,7 +176,8 @@ scheduler_G = MultiStepLR(optimizer_G, milestones=[30,80], gamma=0.1)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-
+mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
+mlflow.set_experiment("test_experiment")
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
 def sample_runs(n_row, z_dim, batches_done):
@@ -237,6 +238,25 @@ for epoch in range(100):
     # print(clf.xgb())
 
 
+with mlflow.start_run():
+    mlflow.log_params(params)
 
+    mlflow.log_metric("loss", g_loss)
+    mlflow.log_metric("d_loss", d_loss)
+
+    mlflow.set_tag("Training Info", "Test")
+
+    model_info_gen = mlflow.sklearn.log_model(
+        sk_model = encoder_generator,
+        artifact_path="mlflow/gen",
+        input_example=in_out_rs,
+        registered_model_name="G_tracking",
+    )
+    model_info_disc = mlflow.sklearn.log_model(
+        sk_model=discriminator,
+        artifact_path="mlflow/discriminator",
+        input_example=z_dim,
+        registered_model_name="D_tracking",
+    )
 
 
