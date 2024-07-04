@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1719899566454
+current_stage: None
+description: ''
+last_updated_timestamp: 1719899566454
+name: G_tracking
+run_id: 0b58e38dd56442edbc132bd3642033e7
+run_link: ''
+source: mlflow-artifacts:/968941286477699787/0b58e38dd56442edbc132bd3642033e7/artifacts/mlflow/gen
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/968941286477699787/0b58e38dd56442edbc132bd3642033e7/artifacts/mlflow/gen
+user_id: null
+version: 4

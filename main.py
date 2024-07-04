@@ -41,14 +41,21 @@ logcat_cols = df.filter(regex='^Logcat')
 process_col = df["Process_total"]
 
 
-
-"""-----------------------------------------------data viz-----------------------------------------------"""
 encoder = LabelEncoder()
 df_enc = df.copy()
 cols = ["Category", "Family", "Before_or_After_Reboot", "Hash"]
 for i in cols:
-    df_enc[i] = encoder.fit_transform(df[i])
+    df_enc[i] = encoder.fit_transform(df_enc[i])
+#     label_mappings[i] = dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))
+# for col, mapping in label_mappings.items():
+#     print(f"Mapping for {col}: {mapping}")
 
+for col in cols:
+    value_counts = df[col].value_counts()
+    singletons = value_counts[value_counts == 1].index
+    df = df[~df[col].isin(singletons)]
+
+"""-----------------------------------------------data viz-----------------------------------------------"""
 def histogram_plot(data, features):
     for i in features:
         plt.figure(figsize=(10, 10))
@@ -75,21 +82,23 @@ def multivariate_analysis(data_col):
 
 
 
+def corr(df_enc, df):
+    correlation = df_enc.corr()
+    f_corr = {}
+    for column in correlation.columns:
+        correlated_with = list(correlation.index[(correlation[column] >= 0.75) | (correlation[column] <= -0.75)])
+        for corr_col in correlated_with:
+            if corr_col != column:
+                df_corr = correlation.loc[corr_col, column]
+                f_corr[(column, corr_col)] = df_corr
+    f_corr = pd.DataFrame.from_dict(f_corr, orient="index")
+    f_corr = f_corr.drop_duplicates()
+    f_corr.to_csv("f_corr.csv")
+    columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
+    df = df.drop(columns=columns_to_drop)
+    return df
 
-correlation = df_enc.corr()
-f_corr = {}
-for column in correlation.columns:
-    correlated_with = list(correlation.index[(correlation[column] >= 0.75) | (correlation[column] <= -0.75)])
-    for corr_col in correlated_with:
-        if corr_col != column:
-            df_corr = correlation.loc[corr_col, column]
-            f_corr[(column, corr_col)] = df_corr
-f_corr = pd.DataFrame.from_dict(f_corr, orient="index")
-f_corr = f_corr.drop_duplicates()
-# f_corr.to_csv("f_corr.csv")
 
-columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
-df = df.drop(columns=columns_to_drop)
 
 
 def remove_outliers_zscore(df, threshold=3):
@@ -97,17 +106,19 @@ def remove_outliers_zscore(df, threshold=3):
     df_cleaned = df[(z_scores < threshold).all(axis=1)]
     return df_cleaned
 
-df = remove_outliers_zscore(df_enc)
+df_cl = remove_outliers_zscore(df_enc)
 
 
 
 
 """-----------------------------------------------vertical data split-----------------------------------------------"""
 y = df[["Category", "Family", "Before_or_After_Reboot"]]
+y_cl = df_cl[["Category", "Family", "Before_or_After_Reboot"]]
+
 
 df["Hash"] = encoder.fit_transform(df["Hash"])
 X = df.drop(y, axis = 1)
-
+X_cl = df_cl.drop(y_cl, axis = 1)
 
 
 """-----------------------------------------------data preprocessing-----------------------------------------------"""

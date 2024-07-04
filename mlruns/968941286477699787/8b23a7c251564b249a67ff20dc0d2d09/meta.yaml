@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/8b23a7c251564b249a67ff20dc0d2d09/artifacts
+end_time: 1719953648823
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: 8b23a7c251564b249a67ff20dc0d2d09
+run_name: smiling-skunk-749
+run_uuid: 8b23a7c251564b249a67ff20dc0d2d09
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1719953648811
+status: 4
+tags: []
+user_id: silver
