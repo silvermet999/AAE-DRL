@@ -41,7 +41,7 @@ cuda = True if cuda.is_available() else False
 df_sel = main.x_train[:5000]
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
-hl_dimd = (10, 10, 10, 10, 10, 10, 10)
+hl_dimd = (10, 10, 10, 10, 10)
 out_in_dim = 40 # in for the dec and disc out for the enc/gen
 z_dim = 10
 params = {
@@ -162,6 +162,7 @@ def calc_gradient_penalty(netD, real_data, fake_data, device='cpu', lambda_=10):
 
     interpolates = alpha * real_data + (1 - alpha) * fake_data
     interpolates = interpolates.to(device)
+    interpolates.requires_grad_(True)
 
     disc_interpolates = netD(interpolates)
 
@@ -193,8 +194,8 @@ discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.85, 0.90), weight_decay=0.0001)
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.85, 0.90), weight_decay=0.0001)
 scheduler_D = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
@@ -227,12 +228,12 @@ for fold, (train_index, val_index) in enumerate(kf.split(df_sel)):
             str_idx = i * 24
             end_idx = str_idx + 24
             batch_data = df_sel[str_idx:end_idx]
-            batch_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
+            train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
                 batch_data, dtype=torch.float)
 
-            real = (batch_tensor - batch_tensor.mean()) / batch_tensor.std()
-            valid = torch.ones((batch_tensor.shape[0], 1)).cuda() if cuda else torch.ones((batch_tensor.shape[0], 1))
-            fake = torch.zeros((batch_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((batch_tensor.shape[0], 1))
+            real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
+            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
+            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
             optimizer_G.zero_grad()
 
             encoded = encoder_generator(real)
@@ -246,7 +247,7 @@ for fold, (train_index, val_index) in enumerate(kf.split(df_sel)):
 
             optimizer_D.zero_grad()
 
-            z = Tensor(np.random.lognormal(0, 1, (batch_tensor.shape[0], z_dim)))
+            z = Tensor(np.random.lognormal(0, 1, (train_data_tensor.shape[0], z_dim)))
 
             # real and fake loss should be close
             # discriminator(z) should be close to 0
@@ -269,21 +270,21 @@ for fold, (train_index, val_index) in enumerate(kf.split(df_sel)):
 
 
         """----------------------------------------------model testing-----------------------------------------------"""
-        encoder_generator.eval()
-        decoder.eval()
-        discriminator.eval()
+    encoder_generator.eval()
+    decoder.eval()
+    discriminator.eval()
 
-        with torch.no_grad():
-            val_encoded = encoder_generator(val_data)
-            val_decoded = decoder(val_encoded)
-        recon_loss_val = recon_loss(val_decoded, val_data)
-        valid_val = torch.ones((val_data.shape[0], 1)).cuda() if cuda else torch.ones((val_data.shape[0], 1))
-        adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
+    with torch.no_grad():
+        val_encoded = encoder_generator(val_tensor)
+        val_decoded = decoder(val_encoded)
+    recon_loss_val = recon_loss(val_decoded, val_data)
+    valid_val = torch.ones((val_data.shape[0], 1)).cuda() if cuda else torch.ones((val_data.shape[0], 1))
+    adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
 
-        recon_loss.append(recon_loss_val.item())
-        adversarial_loss.append(adv_loss_val.item())
-        print(
-            f"Fold {fold + 1} - Reconstruction Loss: {recon_loss_val.item()}, Adversarial Loss: {adv_loss_val.item()}")
+    recon_loss.append(recon_loss_val.item())
+    adversarial_loss.append(adv_loss_val.item())
+    print(
+        f"Fold {fold + 1} - Reconstruction Loss: {recon_loss_val.item()}, Adversarial Loss: {adv_loss_val.item()}")
 
 """--------------------------------------------------mlflow--------------------------------------------------"""
 with mlflow.start_run():
