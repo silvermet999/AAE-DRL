@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/208d63190546450cada1c5d98f2995bf/artifacts
+end_time: 1720323276147
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: 208d63190546450cada1c5d98f2995bf
+run_name: handsome-gnat-771
+run_uuid: 208d63190546450cada1c5d98f2995bf
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720323276125
+status: 4
+tags: []
+user_id: silver

@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/820566520406374179/a6b4e51c7c19418b8da4abc17b416411/artifacts
+deleted_time: 1720202587094
+end_time: 1720078199626
+entry_point_name: ''
+experiment_id: '820566520406374179'
+lifecycle_stage: deleted
+run_id: a6b4e51c7c19418b8da4abc17b416411
+run_name: exultant-wren-362
+run_uuid: a6b4e51c7c19418b8da4abc17b416411
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720078199616
+status: 4
+tags: []
+user_id: silver

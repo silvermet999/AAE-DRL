@@ -38,7 +38,8 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df_sel = main.x_train[:5000]
+df_sel = main.x_train[:10000]
+df_test = main.x_test[:2500]
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10)
@@ -57,15 +58,6 @@ params = {
 """---------------------------------------------backprop and hidden layers-------------------------------------------"""
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    """ 
-    stockasticity :
-    samples sampled_z from a standard lognormal distribution (np.random.lognormal(0, 1, ...)) with the same shape as mu; 
-    the mean of the distribution in the latent space.
-    Instead of directly using the mean mu to represent the latent variable, the model samples from a distribution around mu.
-    
-    Backpropagation:
-    sampled_z seperate from mu and logvar.
-    """
     sampled_z = Tensor(np.random.lognormal(0, 1, (mu.size(0), z_dim)))
     z = sampled_z * std + mu
     return z
@@ -156,33 +148,6 @@ class Discriminator(Module):
 
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
-def calc_gradient_penalty(netD, real_data, fake_data, device='cpu', lambda_=10):
-    alpha = torch.rand(real_data.size(0), 1, device=device)
-    alpha = alpha.expand(real_data.size())
-
-    interpolates = alpha * real_data + (1 - alpha) * fake_data
-    interpolates = interpolates.to(device)
-    interpolates.requires_grad_(True)
-
-    disc_interpolates = netD(interpolates)
-
-    gradients = torch.autograd.grad(
-        outputs=disc_interpolates, inputs=interpolates,
-        grad_outputs=torch.ones(disc_interpolates.size(), device=device),
-        create_graph=True, retain_graph=True, only_inputs=True)[0]
-
-    gradients = gradients.view(real_data.size(0), -1)
-    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * lambda_
-    return gradient_penalty
-
-def discriminator_loss(real_samples, fake_samples, discriminator):
-    real_validity = discriminator(real_samples)
-    fake_validity = discriminator(fake_samples)
-    gradient_penalty = calc_gradient_penalty(discriminator, real_samples, fake_samples)
-    d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + gradient_penalty
-    return d_loss
-
-
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
@@ -194,8 +159,8 @@ discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.85, 0.90), weight_decay=0.0001)
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.85, 0.90), weight_decay=0.0001)
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.0001, betas=(opt.b1, opt.b2))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(opt.b1, opt.b2))
 scheduler_D = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
@@ -211,80 +176,91 @@ def sample_runs(n_row, z_dim, batches_done):
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
     dim_reduction.x_pca_train = pd.DataFrame(gen_data)
-    dim_reduction.x_pca_train.to_csv(f"runs/{batches_done}.csv", index=False)
+    dim_reduction.x_pca_train.to_csv(f"runs/10000.csv", index=False)
 
 
-"""--------------------------------------------------model training--------------------------------------------------"""
-kf = KFold(n_splits=5)
-d_loss_list = []
-g_loss_list = []
-for fold, (train_index, val_index) in enumerate(kf.split(df_sel)):
-    print(f"Training fold {fold + 1}/{kf.n_splits}")
-    train_data, val_data = df_sel[train_index], df_sel[val_index]
-    val_tensor = torch.tensor(val_data, dtype=torch.float).cuda() if cuda else torch.tensor(val_data, dtype=torch.float)
-    for epoch in range(100):
-        n_batch = len(df_sel) // 24
-        for i in range(n_batch):
-            str_idx = i * 24
-            end_idx = str_idx + 24
-            batch_data = df_sel[str_idx:end_idx]
-            train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
-                batch_data, dtype=torch.float)
+"""------------------------------------------------model training------------------------------------------------"""
+for epoch in range(50):
+    n_batch = len(df_sel) // 24
+    for i in range(n_batch):
+        str_idx = i * 24
+        end_idx = str_idx + 24
+        batch_data = df_sel[str_idx:end_idx]
+        train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
+            batch_data, dtype=torch.float)
 
-            real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
-            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
-            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
-            optimizer_G.zero_grad()
+        real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
+        valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
+        fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
 
-            encoded = encoder_generator(real)
-            decoded = decoder(encoded)
-            g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(
-                        decoded, real
-                    )
+        optimizer_G.zero_grad()
+        encoded = encoder_generator(real)
+        decoded = decoder(encoded)
+        g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(
+                    decoded, real
+                )
 
-            g_loss.backward()
-            optimizer_G.step()
+        g_loss.backward()
+        optimizer_G.step()
 
-            optimizer_D.zero_grad()
+        optimizer_D.zero_grad()
 
-            z = Tensor(np.random.lognormal(0, 1, (train_data_tensor.shape[0], z_dim)))
+        z = Tensor(np.random.lognormal(0, 1, (batch_data.shape[0], z_dim)))
 
-            # real and fake loss should be close
-            # discriminator(z) should be close to 0
-            # real_loss = adversarial_loss(discriminator(z), valid)
-            # fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
-            # d_loss = 0.5 * (real_loss + fake_loss)
-            z_fake = encoded.detach()
-            d_loss = discriminator_loss(z, z_fake, discriminator)
+        # real and fake loss should be close
+        # discriminator(z) should be close to 0
+        real_loss = adversarial_loss(discriminator(z), valid)
+        fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
+        d_loss = 0.5 * (real_loss + fake_loss)
 
-            d_loss.backward()
-            optimizer_D.step()
+        d_loss.backward()
+        optimizer_D.step()
 
         scheduler_G.step()
         scheduler_D.step()
-        print(epoch, opt.n_epochs, d_loss.item(), g_loss.item())
+        print(epoch, d_loss.item(), g_loss.item())
 
         batches_done = epoch * len(df_sel)
         if batches_done % opt.sample_interval == 0:
-            sample_runs(n_row=71, z_dim=10, batches_done=3)
+            sample_runs(n_row=71, z_dim=10, batches_done=24)
 
 
-        """----------------------------------------------model testing-----------------------------------------------"""
+"""----------------------------------------------model testing-----------------------------------------------"""
+n_splits = 5
+kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+recon_losses = []
+adversarial_losses = []
+for fold, (_, val_index) in enumerate(kf.split(df_test)):
+    print(f"Fold {fold + 1}/{n_splits}")
+    df_val = df_test[val_index]
+    fold_recon_loss = []
+    fold_adversarial_loss = []
     encoder_generator.eval()
     decoder.eval()
     discriminator.eval()
+    n_batch = len(df_val) // 16
+    for i in range(n_batch):
+        str_idx = i * 16
+        end_idx = str_idx + 16
+        with torch.no_grad():
+            val_tensor = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
+            val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
+            val_encoded = encoder_generator(val_real)
+            val_decoded = decoder(val_encoded)
+        recon_loss_val = recon_loss(val_decoded, val_real)
+        valid_val = torch.ones((val_real.shape[0], 1)).cuda() if cuda else torch.ones((val_real.shape[0], 1))
+        adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
+        fold_recon_loss.append(recon_loss_val.item())
+        fold_adversarial_loss.append(adv_loss_val.item())
+    recon_losses.append(np.mean(fold_recon_loss))
+    adversarial_losses.append(np.mean(fold_adversarial_loss))
+avg_recon_loss = np.mean(recon_losses)
+avg_adversarial_loss = np.mean(adversarial_losses)
+std_recon_loss = np.std(recon_losses)
+std_adversarial_loss = np.std(adversarial_losses)
+print(f"Average Reconstruction Loss: {avg_recon_loss:.4f} ± {std_recon_loss:.4f}")
+print(f"Average Adversarial Loss: {avg_adversarial_loss:.4f} ± {std_adversarial_loss:.4f}")
 
-    with torch.no_grad():
-        val_encoded = encoder_generator(val_tensor)
-        val_decoded = decoder(val_encoded)
-    recon_loss_val = recon_loss(val_decoded, val_data)
-    valid_val = torch.ones((val_data.shape[0], 1)).cuda() if cuda else torch.ones((val_data.shape[0], 1))
-    adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
-
-    recon_loss.append(recon_loss_val.item())
-    adversarial_loss.append(adv_loss_val.item())
-    print(
-        f"Fold {fold + 1} - Reconstruction Loss: {recon_loss_val.item()}, Adversarial Loss: {adv_loss_val.item()}")
 
 """--------------------------------------------------mlflow--------------------------------------------------"""
 with mlflow.start_run():
@@ -310,17 +286,6 @@ with mlflow.start_run():
         registered_model_name="D_tracking",
     )
 
-    model_info_recon = mlflow.sklearn.log_model(
-        sk_model=recon_loss_val,
-        artifact_path="mlflow/recon_test",
-        input_example=val_decoded,
-        registered_model_name="R_tracking",
-    )
-    model_info_adv = mlflow.sklearn.log_model(
-        sk_model=adv_loss_val,
-        artifact_path="mlflow/adv_loss",
-        input_example=val_encoded,
-        registered_model_name="A_tracking",
-    )
+
 
 

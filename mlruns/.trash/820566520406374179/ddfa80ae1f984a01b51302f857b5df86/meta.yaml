@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/820566520406374179/ddfa80ae1f984a01b51302f857b5df86/artifacts
+deleted_time: 1720202587094
+end_time: 1720078272319
+entry_point_name: ''
+experiment_id: '820566520406374179'
+lifecycle_stage: deleted
+run_id: ddfa80ae1f984a01b51302f857b5df86
+run_name: calm-tern-189
+run_uuid: ddfa80ae1f984a01b51302f857b5df86
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720078272309
+status: 4
+tags: []
+user_id: silver

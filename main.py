@@ -128,6 +128,7 @@ def robust_scaler(df):
     return df
 
 X_rs = robust_scaler(X)
+X_rs_cl = robust_scaler(X_cl)
 # np.isnan(X_rs).any()
 
 
@@ -139,4 +140,4 @@ def max_abs_scaler(df):
 X_mas = max_abs_scaler(X)
 
 x_train, x_test, y_train, y_test = train_test_split(X_rs, y, test_size=0.2, random_state=42)
-# x_train, x_test, y_train, y_test = train_test_split(X_mas, y, test_size=0.2, random_state=42)
+x_train_cl, x_test_cl, y_train_cl, y_test_cl = train_test_split(X_rs_cl, y_cl, test_size=0.2, random_state=42)

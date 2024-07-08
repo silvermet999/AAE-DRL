@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, IsolationForest
-from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.model_selection import KFold, GridSearchCV, cross_val_score
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from sklearn.metrics import accuracy_score, auc, roc_curve, recall_score
 from matplotlib.legend_handler import HandlerLine2D
@@ -15,17 +15,6 @@ from imblearn.over_sampling import SMOTE, ADASYN
 from sklearn.utils import compute_sample_weight
 import main
 from skopt import BayesSearchCV, space
-
-
-
-def gbc():
-    clf = GradientBoostingClassifier(n_estimators=10, random_state=42)
-    clf = clf.fit(main.x_train, main.y_train.iloc[:, 0])
-    pred = clf.predict(main.x_test)
-    class_report = classification_report(main.y_test.iloc[:10688, 0], pred)
-    with open('gbc_classification_report.txt', 'w') as f:
-        f.write(class_report)
-    return pred, class_report
 
 
 
@@ -69,7 +58,7 @@ def xgb():
     sample_weights[9] = 2.0
     sample_weights[13] = 3.0
 
-    kf = KFold(n_splits=3, shuffle=True, random_state=0)
+    kf = KFold(n_splits=10, shuffle=True, random_state=0)
     sm = SMOTE(random_state=42)
     scores = []
 
@@ -93,7 +82,7 @@ def xgb():
 
         class_report = classification_report(y_val, y_pred)
 
-        with open('xgb/xgb_kf_smote_sing_tweek_classification_report.txt', 'w') as f:
+        with open('xgb/xgb_kf10_smote_classification_report.txt', 'w') as f:
             f.write(class_report)
 
     return y_pred, class_report
@@ -101,77 +90,53 @@ def xgb():
 
 
 
-
-param_grid = {
-    'n_estimators': [50, 100, 200],
-    'learning_rate': [0.01, 0.1, 0.5, 1.0],
-    'estimator__max_depth': [1, 2, 3]
-}
-
-
 def adaboost():
-    base_estimator = DecisionTreeClassifier(
-        max_depth=50
+    param_grid = {
+    'n_estimators': [50, 100, 200, 300, 400],
+    'learning_rate': [0.01, 0.1, 0.5, 1],
+    'algorithm': ['SAMME']
+}
+    clf = AdaBoostClassifier()
+    grid_search = GridSearchCV(
+        estimator=clf,
+        param_grid=param_grid,
+        cv=5,
+        n_jobs=-1,
+        verbose=2,
+        scoring='accuracy'
     )
-    clf = AdaBoostClassifier(
-        estimator=base_estimator,
-        n_estimators=50,
-        learning_rate=0.1,
-        algorithm="SAMME",
-        random_state=42
-    )
-    y = main.y.iloc[:, 0]
-    sample_weights = np.ones_like(y, dtype=float)
-    sample_weights[3] = 2.0
-    sample_weights[9] = 2.0
-    sample_weights[13] = 3.0
-
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    scores = []
-
-    for train_index, val_index in kf.split(main.x_train):
-        X_tr, X_val = main.x_train[train_index], main.x_train[val_index]
-        y_tr, y_val = y[train_index], y[val_index]
-        sample_weights_tr = sample_weights[train_index]
-
-        clf.fit(X_tr, y_tr, sample_weight=sample_weights_tr)
-        y_pred = clf.predict(X_val)
-        scores.append(accuracy_score(y_val, y_pred))
-        class_report = classification_report(y_val, y_pred)
-        with open('adaboost/adaboost_classification_t_report.txt', 'w') as f:
-            f.write(class_report)
+    grid_search.fit(main.x_train_cl, main.y_train_cl["Category"])
+    best_model = grid_search.best_estimator_
+    y_pred = best_model.predict(main.x_test_cl)
+    class_report = classification_report(main.y_test_cl["Category"], y_pred)
+    with open('adaboost/adaboost_classification_cl_report.txt', 'w') as f:
+        f.write(class_report)
+    return best_model, class_report
 
 
-    return class_report
+# space_ada = {
+#     'n_estimators': hp.choice('n_estimators', range(50, 500)),
+#     'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(1)),
+#     'algorithm': hp.choice('algorithm', ['SAMME'])
+# }
 
-
-
-def objective(model, param):
-    trials = Trials()
-    best = fmin(fn=model,
-                space=param,
-                algo=tpe.suggest,
-                max_evals=10,
-                trials=trials)
-    return best
-
-
-# ada = AdaBoostClassifier(estimator=base_estimator)
+# trials = Trials()
+# best = fmin(fn=objective,
+#             space=space_ada,
+#             algo=tpe.suggest,
+#             max_evals=100,
+#             trials=trials)
 #
-# grid_search = GridSearchCV(ada, param_grid=param_grid, cv=5, scoring='accuracy')
-# grid_search.fit(main.x_train, main.y_train.iloc[:, 0])
-#
-# best_params = grid_search.best_params_
-# best_score = grid_search.best_score_
-#
-# print("Best parameters:", best_params)
-# print("Best cross-validation score:", best_score)
+# print("Best hyperparameters:", best)
+
+
+
 
 le = LabelEncoder()
 y_train_bin = le.fit_transform(main.y_train["Category"])
 y_test_bin = le.fit_transform(main.y_test["Category"])
 
-space = {
+space_gbc = {
     "learning_rate": [0.25, 0.1, 0.05, 0.01],
     "n_estimators": [8, 16, 32, 64, 100, 200],
     "max_depth": list(range(1, 33)),
@@ -213,15 +178,4 @@ def gbc():
             f.write(class_report)
     return class_report
 
-
-# gradientboosting = GradientBoostingClassifier()
-#
-# grid_search = GridSearchCV(gradientboosting, param_grid=space, cv=5, scoring='accuracy')
-# grid_search.fit(main.x_train, main.y_train["Category"])
-#
-# best_params = grid_search.best_params_
-# best_score = grid_search.best_score_
-#
-# print("Best parameters:", best_params)
-# print("Best cross-validation score:", best_score)
 
