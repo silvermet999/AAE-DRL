@@ -17,6 +17,39 @@ import main
 from skopt import BayesSearchCV, space
 
 
+synth = pd.read_csv("runs/100009.csv")
+synth2 = pd.read_csv("runs/24.csv")
+synth3 = pd.read_csv("runs/1000011.csv")
+df_synth1 = pd.DataFrame(synth)
+df_synth1 = df_synth1.rename(columns = dict(zip(df_synth1.columns, main.X.columns)))
+df_synth2 = pd.DataFrame(synth2)
+df_synth2 = df_synth2.rename(columns = dict(zip(df_synth2.columns, main.X.columns)))
+df_synth3 = pd.DataFrame(synth3)
+df_synth3 = df_synth3.rename(columns = dict(zip(df_synth3.columns, main.X.columns)))
+X = pd.DataFrame(main.X_rs)
+X = X.rename(columns = dict(zip(X.columns, main.X.columns)))
+frames_un = [df_synth1, df_synth2, X]
+df_synth = pd.concat(frames_un)
+
+synth_sup = pd.read_csv("runs/1000010.csv")
+df_synth_sup = pd.DataFrame(synth_sup)
+df_synth_sup = df_synth_sup.rename(columns = dict(zip(df_synth_sup.columns, main.df_enc.columns)))
+df_enc = pd.DataFrame(main.df_enc)
+df_enc = df_enc.rename(columns = dict(zip(df_enc.columns, main.df_enc.columns)))
+frames_sup = [df_synth_sup, df_enc]
+df_synths = pd.concat(frames_sup)
+
+
+# synth = np.loadtxt("runs/100009.csv")
+# synth2 = np.loadtxt("runs/24.csv")
+# synth4 = np.loadtxt("runs/1000011.csv")
+# synth_sup = np.loadtxt("runs/1000010.csv")
+# synth_sup = np.delete(synth_sup, 0, axis=0)
+# synth_np = np.concatenate([synth, synth2, main.X_rs])
+# synth_np = np.delete(synth_np, 0, axis=0)
+# synth_sup_np = np.concatenate([main.df_enc.to_numpy(), synth_sup])
+
+
 
 def xgb():
     clf = xgboost.XGBClassifier(
@@ -63,26 +96,26 @@ def xgb():
     scores = []
 
     for train_index, val_index in kf.split(main.df):
-        X_tr, X_val = main.X_rs[train_index], main.X_rs[val_index]
+        X_tr, X_val = df_synth.iloc[train_index], df_synth.iloc[val_index]
         y_tr, y_val = y[train_index], y[val_index]
         sample_weights_tr = sample_weights[train_index]
 
-        X_tr_res, y_tr_res = sm.fit_resample(X_tr, y_tr)
+        # X_tr_res, y_tr_res = sm.fit_resample(X_tr, y_tr)
         original_sample_count = len(y_tr)
-        synthetic_sample_count = len(y_tr_res) - original_sample_count
+        synthetic_sample_count = len(y_tr) - original_sample_count
         synthetic_sample_weight = np.mean(sample_weights_tr)
         sample_weights_res = np.concatenate([
             sample_weights_tr,
             np.full(synthetic_sample_count, synthetic_sample_weight)
         ])
 
-        clf.fit(X_tr_res, y_tr_res, sample_weight=sample_weights_res)
+        clf.fit(X_tr, y_tr, sample_weight=sample_weights_res)
         y_pred = clf.predict(X_val)
         scores.append(accuracy_score(y_val, y_pred))
 
         class_report = classification_report(y_val, y_pred)
 
-        with open('xgb/xgb_kf10_smote_classification_report.txt', 'w') as f:
+        with open('xgb/xgb_kf10_synth_classification_report.txt', 'w') as f:
             f.write(class_report)
 
     return y_pred, class_report

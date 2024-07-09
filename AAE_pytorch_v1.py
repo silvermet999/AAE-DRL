@@ -1,4 +1,6 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
+import os
+
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import LabelEncoder
 from torch.optim.lr_scheduler import MultiStepLR
@@ -13,7 +15,6 @@ from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, S
 from torch import Tensor, cuda, exp
 from torchsummary import summary
 import mlflow
-
 import main
 
 """-----------------------------------------------command-line options-----------------------------------------------"""
@@ -38,12 +39,12 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df_sel = main.x_train[:10000]
-df_test = main.x_test[:2500]
-in_out_rs = 127 # in for the enc/gen out for the dec
+df_train = main.df_cl[:10000]
+df_test = main.df_cl[10001:12501]
+in_out_rs = 130 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10)
-out_in_dim = 40 # in for the dec and disc out for the enc/gen
+out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
 params = {
     "lr": 0.01,
@@ -159,8 +160,8 @@ discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.0001, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(opt.b1, opt.b2))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.0001, betas=(0.68, 0.985))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.68, 0.985))
 scheduler_D = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
@@ -171,23 +172,35 @@ mlflow.set_experiment("test_experiment")
 
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
-def sample_runs(n_row, z_dim, batches_done):
+def get_next_file_number():
+    counter_file = "runs/file_counter.txt"
+    if not os.path.exists(counter_file):
+        with open(counter_file, "w") as f:
+            f.write("0")
+        return 0
+    with open(counter_file, "r") as f:
+        counter = int(f.read())
+    with open(counter_file, "w") as f:
+        f.write(str(counter + 1))
+    return counter
+file_number = get_next_file_number()
+def sample_runs(n_row, z_dim):
     z = Tensor(np.random.lognormal(0, 1, (n_row ** 2, z_dim)))
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
     dim_reduction.x_pca_train = pd.DataFrame(gen_data)
-    dim_reduction.x_pca_train.to_csv(f"runs/10000.csv", index=False)
+    filename = f"runs/10000{file_number}.csv"
+    dim_reduction.x_pca_train.to_csv(filename, index=False)
 
 
-"""------------------------------------------------model training------------------------------------------------"""
+"""--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(50):
-    n_batch = len(df_sel) // 24
+    n_batch = len(df_train) // 16
     for i in range(n_batch):
-        str_idx = i * 24
-        end_idx = str_idx + 24
-        batch_data = df_sel[str_idx:end_idx]
-        train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(
-            batch_data, dtype=torch.float)
+        str_idx = i * 16
+        end_idx = str_idx + 16
+        batch_data = df_train.iloc[str_idx:end_idx].values
+        train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data, dtype=torch.float)
 
         real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
         valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
@@ -196,9 +209,7 @@ for epoch in range(50):
         optimizer_G.zero_grad()
         encoded = encoder_generator(real)
         decoded = decoder(encoded)
-        g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(
-                    decoded, real
-                )
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(decoded, real)
 
         g_loss.backward()
         optimizer_G.step()
@@ -216,13 +227,13 @@ for epoch in range(50):
         d_loss.backward()
         optimizer_D.step()
 
-        scheduler_G.step()
-        scheduler_D.step()
-        print(epoch, d_loss.item(), g_loss.item())
+    scheduler_G.step()
+    scheduler_D.step()
+    print(epoch, d_loss.item(), g_loss.item())
 
-        batches_done = epoch * len(df_sel)
-        if batches_done % opt.sample_interval == 0:
-            sample_runs(n_row=71, z_dim=10, batches_done=24)
+    batches_done = epoch * len(df_train)
+    if batches_done % opt.sample_interval == 0:
+        sample_runs(n_row=71, z_dim=10)
 
 
 """----------------------------------------------model testing-----------------------------------------------"""
@@ -232,7 +243,7 @@ recon_losses = []
 adversarial_losses = []
 for fold, (_, val_index) in enumerate(kf.split(df_test)):
     print(f"Fold {fold + 1}/{n_splits}")
-    df_val = df_test[val_index]
+    df_val = df_test.iloc[val_index]
     fold_recon_loss = []
     fold_adversarial_loss = []
     encoder_generator.eval()
@@ -243,7 +254,7 @@ for fold, (_, val_index) in enumerate(kf.split(df_test)):
         str_idx = i * 16
         end_idx = str_idx + 16
         with torch.no_grad():
-            val_tensor = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
+            val_tensor = torch.tensor(df_val.iloc[str_idx:end_idx].values, dtype=torch.float)
             val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
             val_encoded = encoder_generator(val_real)
             val_decoded = decoder(val_encoded)
@@ -277,13 +288,13 @@ with mlflow.start_run():
         sk_model = encoder_generator,
         artifact_path="mlflow/gen",
         input_example=in_out_rs,
-        registered_model_name="G_tracking",
+        registered_model_name="supervised_G_tracking",
     )
     model_info_disc = mlflow.sklearn.log_model(
         sk_model=discriminator,
         artifact_path="mlflow/discriminator",
         input_example=z_dim,
-        registered_model_name="D_tracking",
+        registered_model_name="supervisedD_tracking",
     )
 
 
