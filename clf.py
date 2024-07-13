@@ -3,18 +3,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, IsolationForest
-from sklearn.model_selection import KFold, GridSearchCV, cross_val_score
+from sklearn.model_selection import KFold, GridSearchCV, StratifiedShuffleSplit, train_test_split, cross_val_score
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
-from sklearn.metrics import accuracy_score, auc, roc_curve, recall_score
+from sklearn.metrics import accuracy_score
 from matplotlib.legend_handler import HandlerLine2D
-from sklearn.preprocessing import LabelEncoder, label_binarize
+from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
 import xgboost
 from sklearn.metrics import classification_report
 from imblearn.over_sampling import SMOTE, ADASYN
-from sklearn.utils import compute_sample_weight
 import main
-from skopt import BayesSearchCV, space
 
 
 synth = pd.read_csv("runs/100009.csv")
@@ -31,7 +29,7 @@ X = X.rename(columns = dict(zip(X.columns, main.X.columns)))
 frames_un = [df_synth1, df_synth2, X]
 df_synth = pd.concat(frames_un)
 
-synth_sup = pd.read_csv("runs/1000010.csv")
+synth_sup = pd.read_csv("runs/17.csv")
 df_synth_sup = pd.DataFrame(synth_sup)
 df_synth_sup = df_synth_sup.rename(columns = dict(zip(df_synth_sup.columns, main.df_enc.columns)))
 df_enc = pd.DataFrame(main.df_enc)
@@ -39,15 +37,6 @@ df_enc = df_enc.rename(columns = dict(zip(df_enc.columns, main.df_enc.columns)))
 frames_sup = [df_synth_sup, df_enc]
 df_synths = pd.concat(frames_sup)
 
-
-# synth = np.loadtxt("runs/100009.csv")
-# synth2 = np.loadtxt("runs/24.csv")
-# synth4 = np.loadtxt("runs/1000011.csv")
-# synth_sup = np.loadtxt("runs/1000010.csv")
-# synth_sup = np.delete(synth_sup, 0, axis=0)
-# synth_np = np.concatenate([synth, synth2, main.X_rs])
-# synth_np = np.delete(synth_np, 0, axis=0)
-# synth_sup_np = np.concatenate([main.df_enc.to_numpy(), synth_sup])
 
 
 
@@ -96,62 +85,105 @@ def xgb():
     scores = []
 
     for train_index, val_index in kf.split(main.df):
-        X_tr, X_val = df_synth.iloc[train_index], df_synth.iloc[val_index]
+        X_tr, X_val = df_synths.iloc[train_index], df_synths.iloc[val_index]
         y_tr, y_val = y[train_index], y[val_index]
         sample_weights_tr = sample_weights[train_index]
 
-        # X_tr_res, y_tr_res = sm.fit_resample(X_tr, y_tr)
+        X_tr_res, y_tr_res = sm.fit_resample(X_tr, y_tr)
         original_sample_count = len(y_tr)
-        synthetic_sample_count = len(y_tr) - original_sample_count
+        synthetic_sample_count = len(y_tr_res) - original_sample_count
         synthetic_sample_weight = np.mean(sample_weights_tr)
         sample_weights_res = np.concatenate([
             sample_weights_tr,
             np.full(synthetic_sample_count, synthetic_sample_weight)
         ])
 
-        clf.fit(X_tr, y_tr, sample_weight=sample_weights_res)
+        clf.fit(X_tr_res, y_tr_res, sample_weight=sample_weights_res)
         y_pred = clf.predict(X_val)
         scores.append(accuracy_score(y_val, y_pred))
 
         class_report = classification_report(y_val, y_pred)
 
-        with open('xgb/xgb_kf10_synth_classification_report.txt', 'w') as f:
+        with open('xgb/xgb_kf10_smote_synth_sup_classification_report.txt', 'w') as f:
             f.write(class_report)
 
     return y_pred, class_report
 
 
+def objective(params):
+    model = xgboost.XGBClassifier(
+        objective='multi:softmax',
+        seed=0,
+        **params
+    )
+
+    # Perform cross-validation
+    score = cross_val_score(model, x_train, y_train, cv=5, scoring='accuracy').mean()
+
+    # We want to maximize accuracy, but Hyperopt minimizes the objective function
+    return {'loss': -score, 'status': STATUS_OK}
+
+# Define the search space
+space_xgb = {
+    'max_depth': hp.choice('max_depth', [14, 16, 18]),
+    'gamma': hp.uniform('gamma', 0.01, 0.018),
+    'learning_rate': hp.uniform('learning_rate', 0.01, 0.03),
+    'reg_alpha': hp.uniform('reg_alpha', 2, 4),
+    'reg_lambda': hp.uniform('reg_lambda', 0.5, 1),
+    'colsample_bytree': hp.uniform('colsample_bytree', 0.6, 0.68),
+    'min_child_weight': hp.choice('min_child_weight', [1, 2, 3]),
+    'n_estimators': hp.choice('n_estimators', [160, 180, 200])
+}
+
+# Prepare the data
+le = LabelEncoder()
+ynp = le.fit_transform(main.y["Category"])
+y = pd.DataFrame(ynp, columns=['Category'])
+x_train, x_test, y_train, y_test = train_test_split(df_synth_sup[:39744], y, test_size=.2)
+
+# Run the optimization
+trials = Trials()
+best = fmin(fn=objective,
+            space=space_xgb,
+            algo=tpe.suggest,
+            max_evals=50,
+            trials=trials,
+            verbose=2)
+
+
 
 
 def adaboost():
-    param_grid = {
-    'n_estimators': [50, 100, 200, 300, 400],
-    'learning_rate': [0.01, 0.1, 0.5, 1],
-    'algorithm': ['SAMME']
-}
-    clf = AdaBoostClassifier()
-    grid_search = GridSearchCV(
-        estimator=clf,
-        param_grid=param_grid,
-        cv=5,
-        n_jobs=-1,
-        verbose=2,
-        scoring='accuracy'
+    space_ada = {
+        'n_estimators': hp.choice('n_estimators', range(50, 500)),
+        'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(1)),
+        'algorithm': hp.choice('algorithm', ['SAMME'])
+    }
+    clf = AdaBoostClassifier(
+        n_estimators=400,
+        learning_rate=1
     )
-    grid_search.fit(main.x_train_cl, main.y_train_cl["Category"])
-    best_model = grid_search.best_estimator_
-    y_pred = best_model.predict(main.x_test_cl)
-    class_report = classification_report(main.y_test_cl["Category"], y_pred)
-    with open('adaboost/adaboost_classification_cl_report.txt', 'w') as f:
+    # grid_search = GridSearchCV(
+    #     estimator=clf,
+    #     param_grid=param_grid,
+    #     cv=5,
+    #     n_jobs=-1,
+    #     verbose=2,
+    #     scoring='accuracy'
+    # )
+    # grid_search.fit(main.x_train, main.y_train["Category"])
+    # best_model = grid_search.best_estimator_
+    le = LabelEncoder()
+    y_train = le.fit_transform(main.y_train["Category"])
+    y_test = le.fit_transform(main.y_test["Category"])
+    clf.fit(main.x_train, y_train)
+    y_pred = clf.predict(main.x_test)
+    class_report = classification_report(y_test, y_pred)
+    with open('adaboost/adaboost_classification_report.txt', 'w') as f:
         f.write(class_report)
-    return best_model, class_report
+    return class_report
 
 
-# space_ada = {
-#     'n_estimators': hp.choice('n_estimators', range(50, 500)),
-#     'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(1)),
-#     'algorithm': hp.choice('algorithm', ['SAMME'])
-# }
 
 # trials = Trials()
 # best = fmin(fn=objective,
@@ -212,3 +244,30 @@ def gbc():
     return class_report
 
 
+def isolationforest():
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_samples': ['auto', 0.1, 0.5, 1.0],
+        'contamination': [0.01, 0.05, 0.1, 0.2],
+        'max_features': [0.5, 0.8, 1.0],
+        'bootstrap': [True, False],
+        'random_state' : [0, 24, 45],
+        'warm_start' : [True, False],
+
+    }
+
+    iso_forest = IsolationForest(n_jobs=-1)
+
+    grid_search = GridSearchCV(
+        estimator=iso_forest,
+        param_grid=param_grid,
+        cv=5,
+        scoring='neg_mean_squared_error',
+        n_jobs=-1,
+        verbose=2
+    )
+
+    grid_search.fit(main.X_rs)
+
+    best_params = grid_search.best_params_
+    return best_params

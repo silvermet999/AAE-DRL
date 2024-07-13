@@ -39,8 +39,8 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df_train = main.x_train_cl[:10000]
-df_test = main.x_test_cl[:2500]
+df_train = main.x_train[:10000]
+df_test = main.x_test[:2500]
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10)
@@ -281,6 +281,19 @@ with mlflow.start_run():
     mlflow.log_metric("d_loss", d_loss)
 
     mlflow.set_tag("Training Info", "Test")
+
+    mlflow.log_metric("test_avg_recon_loss", avg_recon_loss)
+    mlflow.log_metric("test_std_recon_loss", std_recon_loss)
+    mlflow.log_metric("test_avg_adversarial_loss", avg_adversarial_loss)
+    mlflow.log_metric("test_std_adversarial_loss", std_adversarial_loss)
+
+    # Log individual fold results
+    for fold, (recon_loss, adv_loss) in enumerate(zip(recon_losses, adversarial_losses)):
+        mlflow.log_metric(f"test_fold_{fold + 1}_recon_loss", recon_loss)
+        mlflow.log_metric(f"test_fold_{fold + 1}_adv_loss", adv_loss)
+
+    mlflow.set_tag("Model Info", "Adversarial Autoencoder")
+    mlflow.set_tag("Evaluation", "5-Fold Cross-Validation")
 
     model_info_gen = mlflow.sklearn.log_model(
         sk_model = encoder_generator,

@@ -39,11 +39,11 @@ cuda = True if cuda.is_available() else False
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-df_train = main.df_cl[:10000]
-df_test = main.df_cl[10001:12501]
+df_train = main.df_enc[:10000]
+df_test = main.df_enc[10001:12501]
 in_out_rs = 130 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
-hl_dimd = (10, 10, 10, 10, 10)
+hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10, 10, 10)
 out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
 params = {
@@ -189,7 +189,7 @@ def sample_runs(n_row, z_dim):
     gen_input = decoder(z)
     gen_data = gen_input.data.cuda().numpy() if cuda else gen_input.data.numpy()
     dim_reduction.x_pca_train = pd.DataFrame(gen_data)
-    filename = f"runs/10000{file_number}.csv"
+    filename = f"runs/{file_number}.csv"
     dim_reduction.x_pca_train.to_csv(filename, index=False)
 
 
@@ -233,7 +233,7 @@ for epoch in range(50):
 
     batches_done = epoch * len(df_train)
     if batches_done % opt.sample_interval == 0:
-        sample_runs(n_row=71, z_dim=10)
+        sample_runs(n_row=200, z_dim=10)
 
 
 """----------------------------------------------model testing-----------------------------------------------"""
@@ -249,10 +249,10 @@ for fold, (_, val_index) in enumerate(kf.split(df_test)):
     encoder_generator.eval()
     decoder.eval()
     discriminator.eval()
-    n_batch = len(df_val) // 16
+    n_batch = len(df_val) // 1
     for i in range(n_batch):
-        str_idx = i * 16
-        end_idx = str_idx + 16
+        str_idx = i * 1
+        end_idx = str_idx + 1
         with torch.no_grad():
             val_tensor = torch.tensor(df_val.iloc[str_idx:end_idx].values, dtype=torch.float)
             val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
@@ -279,16 +279,33 @@ with mlflow.start_run():
 
     mlflow.log_metric("g_loss", g_loss)
     mlflow.log_metric("d_loss", d_loss)
-    mlflow.log_metric("recon_loss", recon_loss)
-    mlflow.log_metric("adversarial_loss", adversarial_loss)
 
     mlflow.set_tag("Training Info", "Test")
+
+    mlflow.log_metric("test_avg_recon_loss", avg_recon_loss)
+    mlflow.log_metric("test_std_recon_loss", std_recon_loss)
+    mlflow.log_metric("test_avg_adversarial_loss", avg_adversarial_loss)
+    mlflow.log_metric("test_std_adversarial_loss", std_adversarial_loss)
+
+    # Log individual fold results
+    for fold, (recon_loss, adv_loss) in enumerate(zip(recon_losses, adversarial_losses)):
+        mlflow.log_metric(f"test_fold_{fold + 1}_recon_loss", recon_loss)
+        mlflow.log_metric(f"test_fold_{fold + 1}_adv_loss", adv_loss)
+
+    mlflow.set_tag("Model Info", "Adversarial Autoencoder")
+    mlflow.set_tag("Evaluation", "5-Fold Cross-Validation")
 
     model_info_gen = mlflow.sklearn.log_model(
         sk_model = encoder_generator,
         artifact_path="mlflow/gen",
         input_example=in_out_rs,
         registered_model_name="supervised_G_tracking",
+    )
+    model_info_dec = mlflow.sklearn.log_model(
+        sk_model=decoder,
+        artifact_path="mlflow/decoder",
+        input_example=z_dim,
+        registered_model_name="supervised_Dc_tracking",
     )
     model_info_disc = mlflow.sklearn.log_model(
         sk_model=discriminator,
