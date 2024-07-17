@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/f11d475c1f0f4de29733be9f311ce64c/artifacts
+end_time: 1720734934642
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: f11d475c1f0f4de29733be9f311ce64c
+run_name: worried-crane-860
+run_uuid: f11d475c1f0f4de29733be9f311ce64c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720734925437
+status: 3
+tags: []
+user_id: silver

@@ -1,8 +1,9 @@
 artifact_uri: mlflow-artifacts:/968941286477699787/c2481409a792410d8725a5b1422dee94/artifacts
+deleted_time: 1720544481129
 end_time: 1720492801306
 entry_point_name: ''
 experiment_id: '968941286477699787'
-lifecycle_stage: active
+lifecycle_stage: deleted
 run_id: c2481409a792410d8725a5b1422dee94
 run_name: charming-shrike-14
 run_uuid: c2481409a792410d8725a5b1422dee94

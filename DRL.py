@@ -26,7 +26,6 @@ def main():
     print(select_env)
 
     config = PPOConfig().environment(select_env)
-    config.framework("tf2")
     # config.model_config = {
     #     "fcnet_hiddens": [64, 64],
     #     "fcnet_activation": "relu"

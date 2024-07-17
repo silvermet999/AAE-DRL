@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/e21a73f7de464612b715eb1b9f9bd81e/artifacts
+end_time: 1720546099474
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: e21a73f7de464612b715eb1b9f9bd81e
+run_name: bald-midge-250
+run_uuid: e21a73f7de464612b715eb1b9f9bd81e
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720546095219
+status: 3
+tags: []
+user_id: silver

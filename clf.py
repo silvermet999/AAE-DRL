@@ -1,41 +1,30 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, IsolationForest
-from sklearn.model_selection import KFold, GridSearchCV, StratifiedShuffleSplit, train_test_split, cross_val_score
+from sklearn.model_selection import KFold, GridSearchCV, train_test_split
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from sklearn.metrics import accuracy_score
-from matplotlib.legend_handler import HandlerLine2D
 from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
 import xgboost
 from sklearn.metrics import classification_report
 from imblearn.over_sampling import SMOTE, ADASYN
 import main
+import torch
+
+cuda = True if torch.cuda.is_available() else False
+torch_gpu = torch.empty((15000, 15000)).cuda()
+torch.cuda.memory_allocated()
 
 
 synth = pd.read_csv("runs/100009.csv")
-synth2 = pd.read_csv("runs/24.csv")
-synth3 = pd.read_csv("runs/1000011.csv")
-df_synth1 = pd.DataFrame(synth)
-df_synth1 = df_synth1.rename(columns = dict(zip(df_synth1.columns, main.X.columns)))
-df_synth2 = pd.DataFrame(synth2)
-df_synth2 = df_synth2.rename(columns = dict(zip(df_synth2.columns, main.X.columns)))
-df_synth3 = pd.DataFrame(synth3)
-df_synth3 = df_synth3.rename(columns = dict(zip(df_synth3.columns, main.X.columns)))
+df_synth = pd.DataFrame(synth)
+df_synth = df_synth.rename(columns = dict(zip(df_synth.columns, main.X.columns)))
 X = pd.DataFrame(main.X_rs)
 X = X.rename(columns = dict(zip(X.columns, main.X.columns)))
-frames_un = [df_synth1, df_synth2, X]
+frames_un = [df_synth, X]
 df_synth = pd.concat(frames_un)
 
-synth_sup = pd.read_csv("runs/17.csv")
-df_synth_sup = pd.DataFrame(synth_sup)
-df_synth_sup = df_synth_sup.rename(columns = dict(zip(df_synth_sup.columns, main.df_enc.columns)))
-df_enc = pd.DataFrame(main.df_enc)
-df_enc = df_enc.rename(columns = dict(zip(df_enc.columns, main.df_enc.columns)))
-frames_sup = [df_synth_sup, df_enc]
-df_synths = pd.concat(frames_sup)
 
 
 
@@ -55,24 +44,6 @@ def xgb():
         num_class=14,
     )
 
-    # search_spaces = {
-    #     'n_estimators': space.Integer(93, 181),
-    #     'max_depth': space.Integer(9, 17),
-    #     'learning_rate': space.Real(0.01, 0.24, 'log-uniform')
-    # }
-
-
-    # opt = BayesSearchCV(
-    #     clf,
-    #     search_spaces=search_spaces,
-    #     n_iter=10,
-    #     random_state=0,
-    #     verbose=1,
-    #     n_jobs=-1,
-    #     scoring='accuracy',
-    #     cv=3
-    # )
-
     le = LabelEncoder()
     y = le.fit_transform(main.y["Category"])
     sample_weights = np.ones_like(y, dtype=float)
@@ -85,7 +56,7 @@ def xgb():
     scores = []
 
     for train_index, val_index in kf.split(main.df):
-        X_tr, X_val = df_synths.iloc[train_index], df_synths.iloc[val_index]
+        X_tr, X_val = df_synth.iloc[train_index], df_synth.iloc[val_index]
         y_tr, y_val = y[train_index], y[val_index]
         sample_weights_tr = sample_weights[train_index]
 
@@ -110,46 +81,44 @@ def xgb():
     return y_pred, class_report
 
 
-def objective(params):
-    model = xgboost.XGBClassifier(
-        objective='multi:softmax',
-        seed=0,
-        **params
-    )
-
-    # Perform cross-validation
-    score = cross_val_score(model, x_train, y_train, cv=5, scoring='accuracy').mean()
-
-    # We want to maximize accuracy, but Hyperopt minimizes the objective function
-    return {'loss': -score, 'status': STATUS_OK}
-
-# Define the search space
-space_xgb = {
-    'max_depth': hp.choice('max_depth', [14, 16, 18]),
-    'gamma': hp.uniform('gamma', 0.01, 0.018),
-    'learning_rate': hp.uniform('learning_rate', 0.01, 0.03),
-    'reg_alpha': hp.uniform('reg_alpha', 2, 4),
-    'reg_lambda': hp.uniform('reg_lambda', 0.5, 1),
-    'colsample_bytree': hp.uniform('colsample_bytree', 0.6, 0.68),
-    'min_child_weight': hp.choice('min_child_weight', [1, 2, 3]),
-    'n_estimators': hp.choice('n_estimators', [160, 180, 200])
+space = {
+    'max_depth': hp.quniform('max_depth', 14, 30, 1),
+    'gamma': hp.uniform('gamma', 0.1, 1),
+    'learning_rate': hp.uniform('learning_rate', np.log(0.01), np.log(0.1)),
+    'reg_alpha': hp.quniform('reg_alpha', 90, 200, 1),
+    'reg_lambda': hp.uniform('reg_lambda', 0, 1),
+    'colsample_bytree': hp.uniform('colsample_bytree', 0.4, 0.9),
+    'min_child_weight': hp.quniform('min_child_weight', 10, 40, 1),
+    'max_delta_step' : hp.uniform('max_delta_step', 0, 5)
 }
+def objective(space):
+    clf=xgboost.XGBClassifier(
+                    n_estimators =180, max_depth = int(space['max_depth']), gamma = space['gamma'],
+                    reg_alpha = int(space['reg_alpha']),min_child_weight=int(space['min_child_weight']),
+                    colsample_bytree=int(space['colsample_bytree']), learning_rate=space['learning_rate'],
+                                         device='cuda')
 
-# Prepare the data
-le = LabelEncoder()
-ynp = le.fit_transform(main.y["Category"])
-y = pd.DataFrame(ynp, columns=['Category'])
-x_train, x_test, y_train, y_test = train_test_split(df_synth_sup[:39744], y, test_size=.2)
+    le = LabelEncoder()
+    y = le.fit_transform(main.y["Category"])
 
-# Run the optimization
+    X_train, X_test, y_train, y_test = train_test_split(df_synth[:39744], y, test_size=.2)
+
+    evaluation = [(X_train, y_train), (X_test, y_test)]
+
+    clf.fit(X_train, y_train,
+            eval_set=evaluation)
+
+    pred = clf.predict(X_test)
+    accuracy = accuracy_score(y_test, pred)
+    return {'loss': -accuracy, 'status': STATUS_OK }
 trials = Trials()
 best = fmin(fn=objective,
-            space=space_xgb,
+            space=space,
             algo=tpe.suggest,
-            max_evals=50,
+            max_evals=100,
             trials=trials,
             verbose=2)
-
+print("Best hyperparameters:", best)
 
 
 

@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/ee004639b33244fa931731adeb5e6f43/artifacts
+deleted_time: 1720544481129
+end_time: 1720497734119
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: deleted
+run_id: ee004639b33244fa931731adeb5e6f43
+run_name: efficient-fly-762
+run_uuid: ee004639b33244fa931731adeb5e6f43
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720497734084
+status: 4
+tags: []
+user_id: silver

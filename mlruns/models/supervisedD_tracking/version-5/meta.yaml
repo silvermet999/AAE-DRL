@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1720800545829
+current_stage: None
+description: ''
+last_updated_timestamp: 1720800545829
+name: supervisedD_tracking
+run_id: 3c1192d13582434ea918093d7a08bcdd
+run_link: ''
+source: mlflow-artifacts:/968941286477699787/3c1192d13582434ea918093d7a08bcdd/artifacts/mlflow/discriminator
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/968941286477699787/3c1192d13582434ea918093d7a08bcdd/artifacts/mlflow/discriminator
+user_id: null
+version: 5

@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1720547765313
+current_stage: None
+description: ''
+last_updated_timestamp: 1720547765313
+name: supervised_Dc_tracking
+run_id: a291b2b8d4614b9eac9ecbbb4ef181ef
+run_link: ''
+source: mlflow-artifacts:/968941286477699787/a291b2b8d4614b9eac9ecbbb4ef181ef/artifacts/mlflow/decoder
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/968941286477699787/a291b2b8d4614b9eac9ecbbb4ef181ef/artifacts/mlflow/decoder
+user_id: null
+version: 1

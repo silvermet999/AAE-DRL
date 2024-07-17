@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/cf2cb0b018894f0cbe3c0e8c09f10b33/artifacts
+deleted_time: 1720544481128
+end_time: 1720499367758
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: deleted
+run_id: cf2cb0b018894f0cbe3c0e8c09f10b33
+run_name: grandiose-doe-568
+run_uuid: cf2cb0b018894f0cbe3c0e8c09f10b33
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720499367712
+status: 4
+tags: []
+user_id: silver

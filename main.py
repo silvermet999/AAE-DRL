@@ -138,6 +138,14 @@ def max_abs_scaler(df):
     return df
 
 X_mas = max_abs_scaler(X)
+X_mas_cl = max_abs_scaler(X_cl)
 
-x_train, x_test, y_train, y_test = train_test_split(X_rs, y, test_size=0.2, random_state=42)
-x_train_cl, x_test_cl, y_train_cl, y_test_cl = train_test_split(X_rs_cl, y_cl, test_size=0.2, random_state=42)
+
+
+x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+x_train_rs, x_test_rs, y_train_rs, y_test_rs = train_test_split(X_rs, y, test_size=0.2, random_state=42)
+x_train_mas, x_test_mas, y_train_mas, y_test_mas = train_test_split(X_mas, y, test_size=0.2, random_state=42)
+
+x_train_cl, x_test_cl, y_train_cl, y_test_cl = train_test_split(X_cl, y_cl, test_size=0.2, random_state=42)
+x_train_rs_cl, x_test_rs_cl, y_train_rs_cl, y_test_rs_cl = train_test_split(X_rs_cl, y_cl, test_size=0.2, random_state=42)
+x_train_mas_cl, x_test_mas_cl, y_train_mas_cl, y_test_mas_cl = train_test_split(X_mas_cl, y_cl, test_size=0.2, random_state=42)

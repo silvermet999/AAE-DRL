@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/968941286477699787/3c1192d13582434ea918093d7a08bcdd/artifacts
+end_time: 1720800545851
+entry_point_name: ''
+experiment_id: '968941286477699787'
+lifecycle_stage: active
+run_id: 3c1192d13582434ea918093d7a08bcdd
+run_name: loud-dog-802
+run_uuid: 3c1192d13582434ea918093d7a08bcdd
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1720800538363
+status: 3
+tags: []
+user_id: silver
