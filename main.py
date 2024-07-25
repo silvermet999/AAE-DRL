@@ -71,15 +71,28 @@ def histogram_plot(data, features):
 # histogram_plot(battery_cols, battery_cols.columns)
 # histogram_plot(logcat_cols, logcat_cols.columns)
 
+# cat_col = sns.countplot(df, x="Category")
+# for p in cat_col.patches:
+#     cat_col.annotate(f'{p.get_height()}', (p.get_x() + p.get_width() / 2., p.get_height()),
+#                 ha='center', va='baseline', rotation = 45)
 
-def multivariate_analysis(data_col):
-    sns.set_theme(style="ticks")
-    for i in data_col.columns:
-        for df in dfs:
-            sns.lmplot(data=df, x=data_col.loc[i], col="Before_or_After_Reboot", hue="Before_or_After_Reboot",
-                       col_wrap=2, palette="muted", ci=None, height=4, scatter_kws={"s": 50, "alpha": 1})
+def plot_family():
+    N = 50
 
+    value_counts = df['Family'].value_counts()
+    top_n = value_counts.nlargest(N)
+    other_count = value_counts.sum() - top_n.sum()
 
+    plot_data = pd.concat([top_n, pd.Series({'Other': other_count})])
+
+    plt.figure(figsize=(12, 6))
+    ax = sns.barplot(x=plot_data.index, y=plot_data.values)
+    for p in ax.patches:
+        ax.annotate(f'{p.get_height()}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                    ha='center', va='baseline', rotation = 45)
+    plt.xticks(rotation=45, ha='right')
+    plt.title(f'Top {N} Categories')
+    plt.tight_layout()
 
 
 def corr(df_enc, df):
