@@ -20,7 +20,6 @@ import itertools
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 cuda = True if cuda.is_available() else False
 df_train = main.x_train_rs[:10000]
-df_test = main.x_test_rs[:2500]
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10, 10, 10)
@@ -147,66 +146,46 @@ summary(decoder, input_size=(z_dim,))
 discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
-lrs = [0.0001, 0.0005, 0.001]
-betas_list = [(0.5, 0.9), (0.55, 0.99), (0.9, 0.999)]
-best_loss = float('inf')
-best_params = {}
+def best_hyperperam():
+    lrs = [0.0001, 0.0005, 0.001]
+    betas_list = [(0.5, 0.9), (0.55, 0.99), (0.9, 0.999)]
+    best_loss = float('inf')
+    best_params = {}
 
-for lr, betas in itertools.product(lrs, betas_list):
-    optimizer_G = torch.optim.Adam(
-        itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=betas
-    )
-    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=betas)
+    for lr, betas in itertools.product(lrs, betas_list):
+        optimizer_G = torch.optim.Adam(
+            itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=betas
+        )
+        optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=betas)
 
-    encoder_generator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-    decoder.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-    discriminator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+        encoder_generator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+        decoder.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+        discriminator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
 
-    for epoch in range(10):
+        for epoch in range(10):
+            train_data_tensor = torch.tensor(df_train, dtype=torch.float).cuda() if cuda else torch.tensor(df_train,
+                                                                                                             dtype=torch.float)
 
-        batch_data = df_train
-        train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data,
-                                                                                                         dtype=torch.float)
+            real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
+            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones(
+                (train_data_tensor.shape[0], 1))
+            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros(
+                (train_data_tensor.shape[0], 1))
 
-        real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
-        valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones(
-            (train_data_tensor.shape[0], 1))
-        fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros(
-            (train_data_tensor.shape[0], 1))
+            optimizer_G.zero_grad()
+            encoded = encoder_generator(real)
+            decoded = decoder(encoded)
+            total_enc_disc = discriminator(encoded)
+            for i in range (len(total_enc_disc)):
+                if total_enc_disc[i] < 0.6 and total_enc_disc[i] > 0.4:
+                    best_enc_disc = total_enc_disc
+                    best_params = {'lr': lr, 'betas': betas}
 
-        optimizer_G.zero_grad()
-        encoded = encoder_generator(real)
-        decoded = decoder(encoded)
-        g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(decoded, real)
-
-        g_loss.backward()
-        optimizer_G.step()
-
-        optimizer_D.zero_grad()
-
-        log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-        z = log_normal.sample((batch_data.shape[0], z_dim)).to(cuda) if cuda else log_normal.sample(
-            (batch_data.shape[0], z_dim))
-
-        # real and fake loss should be close
-        # discriminator(z) should be close to 0
-        real_loss = adversarial_loss(discriminator(z), valid)
-        fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
-        d_loss = 0.5 * (real_loss + fake_loss)
-
-        d_loss.backward()
-        optimizer_D.step()
-
-    total_loss = g_loss.item() + d_loss.item()
-    if total_loss < best_loss:
-        best_loss = total_loss
-        best_params = {'lr': lr, 'betas': betas}
-
-print(f"Best Params: {best_params}, Best Loss: {best_loss}")
+    return best_params, best_enc_disc[-1]
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.55, 0.99))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.55, 0.99))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.9, 0.999))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.9, 0.999))
 scheduler_D = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
@@ -237,7 +216,7 @@ def sample_runs(n_row, z_dim):
 
     gen_df = pd.DataFrame(gen_data, columns=main.X.columns)
     filename = f"runs/rs{file_number}.csv"
-    # gen_df.to_csv(filename, index=False)
+    gen_df.to_csv(filename, index=False)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
