@@ -14,7 +14,6 @@ import mlflow
 import main
 import itertools
 
-"""-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 cuda = True if cuda.is_available() else False
 
 
@@ -36,8 +35,8 @@ summary(discriminator, input_size=(AAE_archi.z_dim,))
 
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.000119, betas=(0.8877876822713408, 0.952847666171996))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.000119, betas=(0.8877876822713408, 0.952847666171996))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.00024403970587553187, betas=(0.9861850134588144, 0.99812389931221))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.000388005447943051, betas=(0.7707220776531871, 0.9449074876517547))
 scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
