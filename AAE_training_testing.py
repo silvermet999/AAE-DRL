@@ -1,14 +1,14 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
-from hyperopt import hp, Trials, tpe, fmin
 from sklearn.model_selection import KFold
 from torch.optim.lr_scheduler import MultiStepLR
+import AAE_archi
 
 import numpy as np
 import pandas as pd
 import torch
-from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid, BCELoss, L1Loss
-from torch import cuda, exp
+from torch.nn import BCELoss, L1Loss
+from torch import cuda
 from torchsummary import summary
 import mlflow
 import main
@@ -16,117 +16,6 @@ import itertools
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 cuda = True if cuda.is_available() else False
-df_train = main.x_train_rs[:10000]
-in_out_rs = 127 # in for the enc/gen out for the dec
-hl_dim = (100, 100, 100, 100, 100)
-hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10, 10, 10)
-out_in_dim = 100 # in for the dec and disc out for the enc/gen
-z_dim = 10
-params = {
-    "lr": 0.01,
-    "batch_size": 24,
-    "n_epochs": 100,
-    "optimizer": "Adam",
-    "gamma": 0.9
-}
-
-
-
-
-"""---------------------------------------------backprop and hidden layers-------------------------------------------"""
-def reparameterization(mu, logvar, z_dim):
-    std = exp(logvar / 2)
-    device = mu.device
-    log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-
-    sampled_z = log_normal.sample((mu.size(0), z_dim)).to(device)
-
-    z = sampled_z * std + mu
-    return z
-
-
-class hl_loop(Module):
-    def __init__(self, i, o):
-        super(hl_loop, self).__init__()
-        self.fc1 = Linear(i, o)
-        self.leakyrelu1 = LeakyReLU(0.2)
-        self.bn = BatchNorm1d(o)
-
-    def forward(self, l0):
-        l1 = self.fc1(l0)
-        l2 = self.leakyrelu1(l1)
-        l3= self.bn(l2)
-        return torch.cat([l3, l0], dim=1)
-
-
-
-"""----------------------------------------------------AAE blocks----------------------------------------------------"""
-# module compatible with PyTorch
-class EncoderGenerator(Module):
-    def __init__(self):
-        super(EncoderGenerator, self).__init__()
-        dim = in_out_rs
-        seq = []
-        for i in list(hl_dim):
-            seq += [hl_loop(dim, i)]
-            dim += i
-        seq.append(Linear(dim, out_in_dim))
-        self.seq = Sequential(*seq)
-
-
-        # projects output to the dim of latent space
-        self.mu = Linear(out_in_dim, z_dim)
-        self.logvar = Linear(out_in_dim, z_dim)
-
-
-# forward propagation
-    def forward(self, input_):
-        x = self.seq(input_)
-        mu = self.mu(x)
-        logvar = self.logvar(x)
-        z = reparameterization(mu, logvar, z_dim)
-        return z
-
-
-class Decoder(Module):
-    def __init__(self):
-        super(Decoder, self).__init__()
-        dim = z_dim
-        seq = []
-        for i in list(hl_dim):
-            seq += [hl_loop(dim, i)]
-            dim += i
-        seq += [Linear(dim, in_out_rs), Tanh()]
-        self.seq = Sequential(*seq)
-
-    def forward(self, z):
-        input_ = self.seq(z)
-        return input_
-
-
-
-class Discriminator(Module):
-    def __init__(self, pack=10):
-        super(Discriminator, self).__init__()
-        dim = z_dim * pack
-        self.pack = pack
-        self.packdim = dim
-        seq = []
-        for i in list(hl_dimd):
-            seq += [
-                Linear(z_dim, i),
-                LeakyReLU(0.2, inplace=True),
-                Linear(10, 10),
-                LeakyReLU(0.2, inplace=True),
-            ]
-            dim = i
-        seq += [Linear(dim, 1), Sigmoid()]
-        self.seq = Sequential(*seq)
-
-
-    def forward(self, input_):
-        return self.seq(input_)
-
 
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
@@ -136,78 +25,19 @@ mlflow.set_experiment("MLflow Quickstart")
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
-encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
-summary(encoder_generator, input_size=(in_out_rs,))
-decoder = Decoder().cuda() if cuda else Decoder()
-summary(decoder, input_size=(z_dim,))
-discriminator = Discriminator().cuda() if cuda else Discriminator()
-summary(discriminator, input_size=(z_dim,))
+encoder_generator = AAE_archi.EncoderGenerator().cuda() if cuda else AAE_archi.EncoderGenerator()
+summary(encoder_generator, input_size=(AAE_archi.in_out_rs,))
+decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
+summary(decoder, input_size=(AAE_archi.z_dim,))
+discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
+summary(discriminator, input_size=(AAE_archi.z_dim,))
 
 
-def train_model(lr, beta):
-    optimizer_G = torch.optim.Adam(
-        itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=(beta, beta)
-    )
-    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(beta, beta))
 
-    def reset_parameters(m):
-        if hasattr(m, 'reset_parameters'):
-            m.reset_parameters()
-
-    encoder_generator.apply(reset_parameters)
-    decoder.apply(reset_parameters)
-    discriminator.apply(reset_parameters)
-
-    best_enc_disc = None
-    best_params = {}
-
-    for epoch in range(10):
-        optim_data_tensor = torch.tensor(df_train, dtype=torch.float).cuda() if cuda else torch.tensor(df_train,
-                                                                                                       dtype=torch.float)
-        optim_real = (optim_data_tensor - optim_data_tensor.mean()) / optim_data_tensor.std()
-
-        optimizer_G.zero_grad()
-        optim_encoded = encoder_generator(optim_data_tensor)
-        total_enc_disc = discriminator(optim_encoded)
-        optimizer_D.zero_grad()
-
-
-        for i in range(len(total_enc_disc)):
-            if 0.4 < total_enc_disc[i].item() < 0.6:
-                best_enc_disc = total_enc_disc
-                best_params = {'lr': lr, 'betas': (beta, beta)}
-
-    return best_params, best_enc_disc
-
-
-def objective(space):
-    try:
-        lr = np.exp(space['lr'])
-        beta = space['beta']
-        best_params, best_enc_disc = train_model(lr, beta)
-        return -best_enc_disc.mean().item()
-    except Exception as e:
-        print(f"Error in objective function: {e}")
-        return np.inf
-
-
-space = {
-    'lr': hp.uniform('lr', np.log(0.0001), np.log(0.001)),
-    'beta': hp.uniform('beta', 0.5, 0.999)
-}
-
-trials = Trials()
-best = fmin(fn=objective,
-            space=space,
-            algo=tpe.suggest,
-            max_evals=100,
-            trials=trials)
-
-print("Best hyperparameters:", best)
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.9, 0.999))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.9, 0.999))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.000119, betas=(0.8877876822713408, 0.952847666171996))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.000119, betas=(0.8877876822713408, 0.952847666171996))
 scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
@@ -243,10 +73,10 @@ def sample_runs(n_row, z_dim):
 
 """--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(100):
-    n_batch = len(main.x_train_rs) // 24
+    n_batch = len(main.x_train_rs) // 16
     for i in range(n_batch):
-        str_idx = i * 24
-        end_idx = str_idx + 24
+        str_idx = i * 16
+        end_idx = str_idx + 16
         batch_data = main.x_train_rs[str_idx:end_idx]
         train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data, dtype=torch.float)
 
@@ -265,7 +95,7 @@ for epoch in range(100):
         optimizer_D.zero_grad()
 
         log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-        z = log_normal.sample((batch_data.shape[0], z_dim)).to(cuda) if cuda else log_normal.sample((batch_data.shape[0], z_dim))
+        z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).to(cuda) if cuda else log_normal.sample((batch_data.shape[0], AAE_archi.z_dim))
 
         # real and fake loss should be close
         # discriminator(z) should be close to 0
@@ -358,13 +188,13 @@ with mlflow.start_run():
     model_info_gen = mlflow.sklearn.log_model(
         sk_model = encoder_generator,
         artifact_path="mlflow/gen",
-        input_example=in_out_rs,
+        input_example=AAE_archi.in_out_rs,
         registered_model_name="supervised_G_tracking",
     )
     model_info_disc = mlflow.sklearn.log_model(
         sk_model=discriminator,
         artifact_path="mlflow/discriminator",
-        input_example=z_dim,
+        input_example=AAE_archi.z_dim,
         registered_model_name="supervisedD_tracking",
     )
 
