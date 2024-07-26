@@ -1,6 +1,6 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
-
+from hyperopt import hp, Trials, tpe, fmin
 from sklearn.model_selection import KFold
 from torch.optim.lr_scheduler import MultiStepLR
 
@@ -12,9 +12,6 @@ from torch import cuda, exp
 from torchsummary import summary
 import mlflow
 import main
-
-from skopt import gp_minimize
-from skopt.space import Real
 import itertools
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
@@ -146,47 +143,72 @@ summary(decoder, input_size=(z_dim,))
 discriminator = Discriminator().cuda() if cuda else Discriminator()
 summary(discriminator, input_size=(z_dim,))
 
-def best_hyperperam():
-    lrs = [0.0001, 0.0005, 0.001]
-    betas_list = [(0.5, 0.9), (0.55, 0.99), (0.9, 0.999)]
-    best_loss = float('inf')
+
+def train_model(lr, beta):
+    optimizer_G = torch.optim.Adam(
+        itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=(beta, beta)
+    )
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(beta, beta))
+
+    def reset_parameters(m):
+        if hasattr(m, 'reset_parameters'):
+            m.reset_parameters()
+
+    encoder_generator.apply(reset_parameters)
+    decoder.apply(reset_parameters)
+    discriminator.apply(reset_parameters)
+
+    best_enc_disc = None
     best_params = {}
 
-    for lr, betas in itertools.product(lrs, betas_list):
-        optimizer_G = torch.optim.Adam(
-            itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=betas
-        )
-        optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=betas)
+    for epoch in range(10):
+        optim_data_tensor = torch.tensor(df_train, dtype=torch.float).cuda() if cuda else torch.tensor(df_train,
+                                                                                                       dtype=torch.float)
+        optim_real = (optim_data_tensor - optim_data_tensor.mean()) / optim_data_tensor.std()
 
-        encoder_generator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-        decoder.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
-        discriminator.apply(lambda m: m.reset_parameters() if hasattr(m, 'reset_parameters') else None)
+        optimizer_G.zero_grad()
+        optim_encoded = encoder_generator(optim_data_tensor)
+        total_enc_disc = discriminator(optim_encoded)
+        optimizer_D.zero_grad()
 
-        for epoch in range(10):
-            train_data_tensor = torch.tensor(df_train, dtype=torch.float).cuda() if cuda else torch.tensor(df_train,
-                                                                                                             dtype=torch.float)
 
-            real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
-            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones(
-                (train_data_tensor.shape[0], 1))
-            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros(
-                (train_data_tensor.shape[0], 1))
+        for i in range(len(total_enc_disc)):
+            if 0.4 < total_enc_disc[i].item() < 0.6:
+                best_enc_disc = total_enc_disc
+                best_params = {'lr': lr, 'betas': (beta, beta)}
 
-            optimizer_G.zero_grad()
-            encoded = encoder_generator(real)
-            decoded = decoder(encoded)
-            total_enc_disc = discriminator(encoded)
-            for i in range (len(total_enc_disc)):
-                if total_enc_disc[i] < 0.6 and total_enc_disc[i] > 0.4:
-                    best_enc_disc = total_enc_disc
-                    best_params = {'lr': lr, 'betas': betas}
+    return best_params, best_enc_disc
 
-    return best_params, best_enc_disc[-1]
+
+def objective(space):
+    try:
+        lr = np.exp(space['lr'])
+        beta = space['beta']
+        best_params, best_enc_disc = train_model(lr, beta)
+        return -best_enc_disc.mean().item()
+    except Exception as e:
+        print(f"Error in objective function: {e}")
+        return np.inf
+
+
+space = {
+    'lr': hp.uniform('lr', np.log(0.0001), np.log(0.001)),
+    'beta': hp.uniform('beta', 0.5, 0.999)
+}
+
+trials = Trials()
+best = fmin(fn=objective,
+            space=space,
+            algo=tpe.suggest,
+            max_evals=100,
+            trials=trials)
+
+print("Best hyperparameters:", best)
 
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, betas=(0.9, 0.999))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.001, betas=(0.9, 0.999))
-scheduler_D = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
+scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.1)
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
