@@ -1,10 +1,13 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
+import os
+
 import torch
 from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid
 from torch import cuda, exp
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
 cuda = True if cuda.is_available() else False
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 in_out_rs = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10)
@@ -100,10 +103,7 @@ class Discriminator(Module):
                 LeakyReLU(0.2, inplace=True),
                 Linear(10, 100),
                 LeakyReLU(0.1, inplace=True),
-                Linear(100, 150),
-                LeakyReLU(0.3, inplace=True),
-
-                Linear(150, 100),
+                Linear(100, 100),
                 LeakyReLU(0.3, inplace=True),
                 Linear(100, 10),
                 LeakyReLU(0.2, inplace=True),
