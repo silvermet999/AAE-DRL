@@ -95,7 +95,7 @@ def plot_family():
     plt.tight_layout()
 
 
-def corr(df_enc, df):
+def corr(df_enc):
     correlation = df_enc.corr()
     f_corr = {}
     for column in correlation.columns:
@@ -108,16 +108,29 @@ def corr(df_enc, df):
     f_corr = f_corr.drop_duplicates()
     f_corr.to_csv("f_corr.csv")
     columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
-    df = df.drop(columns=columns_to_drop)
+    df = df_enc.drop(columns=columns_to_drop)
     return df
 
+df_no = corr(df_enc)
 
 
 
-def remove_outliers_zscore(df, threshold=3):
+
+def remove_outliers_zscore(df, threshold=1.4):
     z_scores = np.abs(stats.zscore(df))
     df_cleaned = df[(z_scores < threshold).all(axis=1)]
     return df_cleaned
+
+# threshold = np.linspace(1, 3, 10)
+#
+# remaining_points = [len(remove_outliers_zscore(df, t)) for t in threshold]
+#
+# plt.figure(figsize=(10, 6))
+# plt.plot(threshold, remaining_points, marker='o')
+# plt.title('Outlier elbow method')
+# plt.xlabel('Z-Score Threshold')
+# plt.ylabel('Number of Remaining Points')
+# plt.grid(True)
 
 df_cl = remove_outliers_zscore(df_enc)
 
@@ -127,11 +140,15 @@ df_cl = remove_outliers_zscore(df_enc)
 """-----------------------------------------------vertical data split-----------------------------------------------"""
 y = df[["Category", "Family", "Before_or_After_Reboot"]]
 y_cl = df_cl[["Category", "Family", "Before_or_After_Reboot"]]
+y_no = df_no[["Category", "Family", "Before_or_After_Reboot"]]
+
 
 
 df["Hash"] = encoder.fit_transform(df["Hash"])
 X = df.drop(y, axis = 1)
 X_cl = df_cl.drop(y_cl, axis = 1)
+X_no = df_no.drop(y_cl, axis = 1)
+
 
 
 """-----------------------------------------------data preprocessing-----------------------------------------------"""
@@ -142,6 +159,8 @@ def robust_scaler(df):
 
 X_rs = robust_scaler(X)
 X_rs_cl = robust_scaler(X_cl)
+X_rs_no = robust_scaler(X_no)
+
 # np.isnan(X_rs).any()
 
 
@@ -152,6 +171,8 @@ def max_abs_scaler(df):
 
 X_mas = max_abs_scaler(X)
 X_mas_cl = max_abs_scaler(X_cl)
+X_mas_no = max_abs_scaler(X_no)
+
 
 
 
@@ -162,3 +183,7 @@ x_train_mas, x_test_mas, y_train_mas, y_test_mas = train_test_split(X_mas, y, te
 x_train_cl, x_test_cl, y_train_cl, y_test_cl = train_test_split(X_cl, y_cl, test_size=0.2, random_state=42)
 x_train_rs_cl, x_test_rs_cl, y_train_rs_cl, y_test_rs_cl = train_test_split(X_rs_cl, y_cl, test_size=0.2, random_state=42)
 x_train_mas_cl, x_test_mas_cl, y_train_mas_cl, y_test_mas_cl = train_test_split(X_mas_cl, y_cl, test_size=0.2, random_state=42)
+
+x_train_no, x_test_no, y_train_no, y_test_no = train_test_split(X_no, y_no, test_size=0.2, random_state=42)
+x_train_rs_no, x_test_rs_no, y_train_rs_no, y_test_rs_no = train_test_split(X_rs_no, y_no, test_size=0.2, random_state=42)
+x_train_mas_no, x_test_mas_no, y_train_mas_no, y_test_mas_no = train_test_split(X_mas_no, y_no, test_size=0.2, random_state=42)

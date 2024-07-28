@@ -11,17 +11,15 @@ import main
 import torch
 
 cuda = True if torch.cuda.is_available() else False
-torch_gpu = torch.empty((15000, 15000)).cuda()
-torch.cuda.memory_allocated()
 
 
-synth = pd.read_csv("runs/100009.csv")
+synth = pd.read_csv("runs/rs38.csv")
 df_synth = pd.DataFrame(synth)
-df_synth = df_synth.rename(columns = dict(zip(df_synth.columns, main.X.columns)))
-X = pd.DataFrame(main.X_rs)
+# df_synth = df_synth.rename(columns = dict(zip(df_synth.columns, main.X.columns)))
+X = pd.DataFrame(main.X_train_rs)
 X = X.rename(columns = dict(zip(X.columns, main.X.columns)))
 frames_un = [df_synth, X]
-df_synth = pd.concat(frames_un)
+df_synth_plus = pd.concat(frames_un)
 
 
 

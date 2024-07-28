@@ -1,23 +1,18 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import AAE_archi
 
 
 class AAE_env(gym.Env):
 
-    def __init__(self, size=5):
+    def __init__(self):
 
-        # Observations are dictionaries with the agent's and the target's location.
-        # Each location is encoded as an element of {0, ..., `size`}^2, i.e. MultiDiscrete([size, size]).
-        self.observation_space = spaces.Dict(
-            {
-                "agent": spaces.Box(0, size - 1, shape=(2,), dtype=int),
-                "target": spaces.Box(0, size - 1, shape=(2,), dtype=int),
-            }
-        )
+        # observation space as a vector
+        self.observation_space = AAE_archi.z_dim # this is the shape not the actual vector
 
-        # We have 4 actions, corresponding to "right", "up", "left", "down", "right"
-        self.action_space = spaces.Discrete(4)
+        # We have 2 actions, corresponding to
+        self.action_space = spaces.Discrete(2)
 
         """
         The following dictionary maps abstract actions from `self.action_space` to 
@@ -59,9 +54,6 @@ class AAE_env(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
 
-        if self.render_mode == "human":
-            self._render_frame()
-
         return observation, info
 
     def step(self, action):
@@ -76,9 +68,6 @@ class AAE_env(gym.Env):
         reward = 1 if terminated else 0  # Binary sparse rewards
         observation = self._get_obs()
         info = self._get_info()
-
-        if self.render_mode == "human":
-            self._render_frame()
 
         return observation, reward, terminated, False, info
 

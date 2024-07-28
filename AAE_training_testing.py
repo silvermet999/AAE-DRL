@@ -20,14 +20,14 @@ cuda = True if cuda.is_available() else False
 
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
-mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
-mlflow.set_experiment("MLflow Quickstart")
+# mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
+# mlflow.set_experiment("MLflow Quickstart")
 
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
 encoder_generator = AAE_archi.EncoderGenerator().cuda() if cuda else AAE_archi.EncoderGenerator()
-summary(encoder_generator, input_size=(AAE_archi.in_out_rs,))
+summary(encoder_generator, input_size=(AAE_archi.in_out,))
 decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
 summary(decoder, input_size=(AAE_archi.z_dim,))
 discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
@@ -37,10 +37,10 @@ summary(discriminator, input_size=(AAE_archi.z_dim,))
 
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=optim_hyperp.best["lrG"], betas=(optim_hyperp.best["beta1G"], optim_hyperp.best["beta2G"]))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=optim_hyperp.best["lrD"], betas=(optim_hyperp.best["beta1D"], optim_hyperp.best["beta2D"]))
-scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.1)
-scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.1)
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=optim_hyperp.best["lr"], betas=(optim_hyperp.best["beta1"], optim_hyperp.best["beta2"]), weight_decay=optim_hyperp.best["weight_decay"])
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=optim_hyperp.best["lr"], betas=(optim_hyperp.best["beta1"], optim_hyperp.best["beta2"]), weight_decay=optim_hyperp.best["weight_decay"])
+scheduler_D = MultiStepLR(optimizer_D, milestones=[optim_hyperp.best["low"], optim_hyperp.best["high"]], gamma=optim_hyperp.best["gamma"])
+scheduler_G = MultiStepLR(optimizer_G, milestones=[optim_hyperp.best["low"], optim_hyperp.best["high"]], gamma=optim_hyperp.best["gamma"])
 
 
 
@@ -70,17 +70,17 @@ def sample_runs(n_row, z_dim):
     gen_data = gen_input.data.numpy()
 
     gen_df = pd.DataFrame(gen_data, columns=main.X.columns)
-    filename = f"runs/rs{file_number}.csv"
+    filename = f"runs/uns{file_number}.csv"
     gen_df.to_csv(filename, index=False)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(100):
-    n_batch = len(main.x_train_rs) // 16
+    n_batch = len(main.x_train) // 16
     for i in range(n_batch):
         str_idx = i * 16
         end_idx = str_idx + 16
-        batch_data = main.x_train_rs[str_idx:end_idx]
+        batch_data = main.x_train[str_idx:end_idx]
         train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data, dtype=torch.float)
 
         real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
@@ -113,7 +113,7 @@ for epoch in range(100):
     scheduler_D.step()
     print(epoch, d_loss.item(), g_loss.item())
 
-    batches_done = epoch * len(main.x_train_rs)
+    batches_done = epoch * len(main.x_train)
     if batches_done % 400 == 0:
         sample_runs(n_row=200, z_dim=10)
 
@@ -138,9 +138,9 @@ n_splits = 5
 kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-for fold, (_, val_index) in enumerate(kf.split(main.x_test_rs)):
+for fold, (_, val_index) in enumerate(kf.split(main.x_test)):
     print(f"Fold {fold + 1}/{n_splits}")
-    df_val = main.x_test_rs[val_index]
+    df_val = main.x_test[val_index]
     fold_recon_loss = []
     fold_adversarial_loss = []
     encoder_generator.eval()
@@ -191,7 +191,7 @@ with mlflow.start_run():
     model_info_gen = mlflow.sklearn.log_model(
         sk_model = encoder_generator,
         artifact_path="mlflow/gen",
-        input_example=AAE_archi.in_out_rs,
+        input_example=AAE_archi.in_out,
         registered_model_name="supervised_G_tracking",
     )
     model_info_disc = mlflow.sklearn.log_model(

@@ -6,9 +6,10 @@ from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, S
 from torch import cuda, exp
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
+# if unsupervised in_out is 127 else 130
 cuda = True if cuda.is_available() else False
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-in_out_rs = 127 # in for the enc/gen out for the dec
+in_out = 127 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
 hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10)
 out_in_dim = 100 # in for the dec and disc out for the enc/gen
@@ -50,7 +51,7 @@ class hl_loop(Module):
 class EncoderGenerator(Module):
     def __init__(self):
         super(EncoderGenerator, self).__init__()
-        dim = in_out_rs
+        dim = in_out
         seq = []
         for i in list(hl_dim):
             seq += [hl_loop(dim, i)]
@@ -81,7 +82,7 @@ class Decoder(Module):
         for i in list(hl_dim):
             seq += [hl_loop(dim, i)]
             dim += i
-        seq += [Linear(dim, in_out_rs), Tanh()]
+        seq += [Linear(dim, in_out), Tanh()]
         self.seq = Sequential(*seq)
 
     def forward(self, z):
