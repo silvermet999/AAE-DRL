@@ -2,16 +2,17 @@
 import os
 
 import torch
-from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid
+from torch.nn import BatchNorm1d, LeakyReLU, Linear, Module, Sequential, Tanh, Sigmoid, Dropout, Conv1d
 from torch import cuda, exp
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-# if unsupervised in_out is 127 else 130
+# if unsupervised in_out is 105 else 106
+# if clean and unsupervised  else
 cuda = True if cuda.is_available() else False
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-in_out = 127 # in for the enc/gen out for the dec
+in_out = 105 # in for the enc/gen out for the dec
 hl_dim = (100, 100, 100, 100, 100)
-hl_dimd = (10, 10, 10, 10, 10, 10, 10, 10)
+hl_dimd = (10, 10)
 out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 10
 
@@ -56,7 +57,7 @@ class EncoderGenerator(Module):
         for i in list(hl_dim):
             seq += [hl_loop(dim, i)]
             dim += i
-        seq.append(Linear(dim, out_in_dim))
+        seq += (Linear(dim, out_in_dim), LeakyReLU(0.2)) # leakyrelu if rs or mas
         self.seq = Sequential(*seq)
 
 
@@ -79,9 +80,24 @@ class Decoder(Module):
         super(Decoder, self).__init__()
         dim = z_dim
         seq = []
-        for i in list(hl_dim):
-            seq += [hl_loop(dim, i)]
-            dim += i
+        for i in list(hl_dimd):
+            seq += [
+                Linear(z_dim, i),
+                LeakyReLU(0.1, inplace=True),
+                BatchNorm1d(10),
+                Linear(10, 100),
+                LeakyReLU(0.2, inplace=True),
+                BatchNorm1d(100),
+                Linear(100, 200),
+                LeakyReLU(0.1, inplace=True),
+                BatchNorm1d(200),
+                Linear(200, 100),
+                LeakyReLU(0.2, inplace=True),
+                BatchNorm1d(100),
+                Linear(100, 10),
+                LeakyReLU(0.1, inplace=True),
+            ]
+            dim = i
         seq += [Linear(dim, in_out), Tanh()]
         self.seq = Sequential(*seq)
 
@@ -101,13 +117,18 @@ class Discriminator(Module):
         for i in list(hl_dimd):
             seq += [
                 Linear(z_dim, i),
-                LeakyReLU(0.2, inplace=True),
-                Linear(10, 100),
                 LeakyReLU(0.1, inplace=True),
-                Linear(100, 100),
-                LeakyReLU(0.3, inplace=True),
-                Linear(100, 10),
+                BatchNorm1d(10),
+                Dropout(0.1),
+                Linear(10, 100),
                 LeakyReLU(0.2, inplace=True),
+                BatchNorm1d(100),
+                Linear(100, 200),
+                LeakyReLU(0.2, inplace=True),
+                BatchNorm1d(200),
+                Dropout(0.3),
+                Linear(200, 10),
+                LeakyReLU(0.1, inplace=True),
 
             ]
             dim = i
