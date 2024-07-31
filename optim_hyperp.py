@@ -40,8 +40,10 @@ def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g,
 
     best_lossg = None
     best_lossd = None
-    best_paramsd = {}
-    best_paramsg = {}
+    best_params = {'lrg': lrg, 'beta1g': b1g, 'beta2g': b2g, "weight_decayg": wg, "lowg": lg, "highg": hg,
+                       "gammag": gg,
+                       'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay": weight_decay, "low": low, "high": high,
+                       "gamma": gamma}
 
     for epoch in range(10):
         n_batch = len(main.X_train) // 16
@@ -87,13 +89,12 @@ def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g,
     if d_loss < 0.7 and g_loss < 0.4:
         best_lossg = g_loss
         best_lossd = d_loss
-        best_paramsg = {'lr': lrg, 'beta1': b1g, 'beta2': b2g, "weight_decay" : wg, "low" : lg, "high": hg, "gamma" : gg}
-        best_paramsd = {'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay" : weight_decay, "low" : low, "high": high, "gamma" : gamma}
-    else:
-        best_paramsg = {'lr': lrg, 'beta1': b1g, 'beta2': b2g, "weight_decay": wg, "low": lg, "high": hg, "gamma": gg}
-        best_paramsd = {'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay": weight_decay, "low": low,
-                        "high": high, "gamma": gamma}
-    return best_paramsg, best_paramsd, best_lossg, best_lossd
+        best_params = {'lrg': lrg, 'beta1g': b1g, 'beta2g': b2g, 'weight_decayg': wg, 'lowg': lg, 'highg': hg,
+                       'gammag': gg,
+                       'lr': lr, 'beta1': beta1, 'beta2': beta2, 'weight_decay': weight_decay, 'low': low, 'high': high,
+                       'gamma': gamma}
+
+    return best_params, best_lossg, best_lossd
 
 
 def objective(space):
@@ -112,7 +113,7 @@ def objective(space):
     hg = space['high']
     gg = space['gamma']
 
-    best_paramg, best_paramd, best_lossg, best_lossd = train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g, wg, lg, hg, gg)
+    best_param, best_lossg, best_lossd = train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g, wg, lg, hg, gg)
     return -best_lossg.mean().item(), -best_lossd.mean().item()
 
 
