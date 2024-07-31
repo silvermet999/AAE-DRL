@@ -119,7 +119,6 @@ class Discriminator(Module):
             Linear(32, 1),
             Sigmoid()
         )
-        # self.seq = Sequential(*seq)
 
 
     def forward(self, input_):

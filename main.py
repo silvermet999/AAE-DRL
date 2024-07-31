@@ -24,7 +24,6 @@ df = pd.concat(dfs, ignore_index=True)
 df = df.drop(df.columns[df.nunique() == 1], axis = 1)
 df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
 
-
 datatypes = pd.DataFrame(df.dtypes)
 null_count = df.count()
 description = df.describe()
@@ -41,19 +40,19 @@ logcat_cols = df.filter(regex='^Logcat')
 process_col = df["Process_total"]
 
 
-encoder = LabelEncoder()
-df_enc = df.copy()
-cols = ["Category", "Family", "Before_or_After_Reboot", "Hash"]
-for i in cols:
-    df_enc[i] = encoder.fit_transform(df_enc[i])
+le = LabelEncoder()
+cols_le = ["Category", "Family", "Hash", "Before_or_After_Reboot"]
+for i in cols_le:
+    df[i] = le.fit_transform(df[i])
 #     label_mappings[i] = dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))
 # for col, mapping in label_mappings.items():
 #     print(f"Mapping for {col}: {mapping}")
 
-for col in cols:
+for col in cols_le:
     value_counts = df[col].value_counts()
     singletons = value_counts[value_counts == 1].index
     df = df[~df[col].isin(singletons)]
+
 
 """-----------------------------------------------data viz-----------------------------------------------"""
 def histogram_plot(data, features):
@@ -94,9 +93,8 @@ def plot_family():
     plt.title(f'Top {N} Categories')
     plt.tight_layout()
 
-
-def corr(df_enc):
-    correlation = df_enc.corr()
+def corr(df):
+    correlation = df.corr()
     f_corr = {}
     for column in correlation.columns:
         correlated_with = list(correlation.index[(correlation[column] >= 0.75) | (correlation[column] <= -0.75)])
@@ -108,13 +106,10 @@ def corr(df_enc):
     f_corr = f_corr.drop_duplicates()
     f_corr.to_csv("f_corr.csv")
     columns_to_drop = {col_pair[1] for col_pair in f_corr.index}
-    df = df_enc.drop(columns=columns_to_drop)
+    df = df.drop(columns=columns_to_drop)
     return df
 
-df_no = corr(df_enc)
-
-
-
+df = corr(df)
 
 def remove_outliers_zscore(df, threshold=1.4):
     z_scores = np.abs(stats.zscore(df))
@@ -132,34 +127,40 @@ def remove_outliers_zscore(df, threshold=1.4):
 # plt.ylabel('Number of Remaining Points')
 # plt.grid(True)
 
-df_cl = remove_outliers_zscore(df_enc)
-
-
-
+df_cl = remove_outliers_zscore(df)
+# df_cl = df_cl.drop(df_cl.columns[df_cl.nunique() == 1], axis = 1)
 
 """-----------------------------------------------vertical data split-----------------------------------------------"""
-y = df[["Category", "Family", "Before_or_After_Reboot"]]
-y_cl = df_cl[["Category", "Family", "Before_or_After_Reboot"]]
-y_no = df_no[["Category", "Family", "Before_or_After_Reboot"]]
+y = df["Category"]
+X = df.drop("Category", axis=1)
+y = pd.get_dummies(y).astype(int)
+cols = ['Backdoor', 'Trojan_Banker', 'Zero_Day', 'No_Category', 'PUA',
+       'FileInfector', 'Ransomware', 'Trojan_Dropper', 'Trojan_SMS',
+       'Trojan_Spy', 'Trojan', 'Adware', 'Riskware', 'Scareware']
+y = y.rename(columns = dict(zip(y.columns, cols)))
 
-
-
-df["Hash"] = encoder.fit_transform(df["Hash"])
-X = df.drop(y, axis = 1)
-X_cl = df_cl.drop(y_cl, axis = 1)
-X_no = df_no.drop(y_cl, axis = 1)
+y_cl = df_cl["Category"]
+X_cl = df_cl.drop("Category", axis = 1)
+y_cl = pd.get_dummies(y_cl).astype(int)
+y_cl = y_cl.rename(columns = dict(zip(y_cl.columns, cols)))
 
 
 
 """-----------------------------------------------data preprocessing-----------------------------------------------"""
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train_cl, X_test_cl, y_train_cl, y_test_cl = train_test_split(X_cl, y_cl, test_size=0.2, random_state=42)
+
+
 def robust_scaler(df):
     scaler = RobustScaler()
     df = scaler.fit_transform(df)
     return df
 
-X_rs = robust_scaler(X)
-X_rs_cl = robust_scaler(X_cl)
-X_rs_no = robust_scaler(X_no)
+X_train_rs = robust_scaler(X_train)
+X_train_rs_cl = robust_scaler(X_train_cl)
+
+X_test_rs = robust_scaler(X_test)
+X_test_rs_cl = robust_scaler(X_test_cl)
 
 # np.isnan(X_rs).any()
 
@@ -169,21 +170,8 @@ def max_abs_scaler(df):
     df = scaler.fit_transform(df)
     return df
 
-X_mas = max_abs_scaler(X)
-X_mas_cl = max_abs_scaler(X_cl)
-X_mas_no = max_abs_scaler(X_no)
+X_train_mas = max_abs_scaler(X_train)
+X_train_mas_cl = max_abs_scaler(X_train_cl)
 
-
-
-
-x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-x_train_rs, x_test_rs, y_train_rs, y_test_rs = train_test_split(X_rs, y, test_size=0.2, random_state=42)
-x_train_mas, x_test_mas, y_train_mas, y_test_mas = train_test_split(X_mas, y, test_size=0.2, random_state=42)
-
-x_train_cl, x_test_cl, y_train_cl, y_test_cl = train_test_split(X_cl, y_cl, test_size=0.2, random_state=42)
-x_train_rs_cl, x_test_rs_cl, y_train_rs_cl, y_test_rs_cl = train_test_split(X_rs_cl, y_cl, test_size=0.2, random_state=42)
-x_train_mas_cl, x_test_mas_cl, y_train_mas_cl, y_test_mas_cl = train_test_split(X_mas_cl, y_cl, test_size=0.2, random_state=42)
-
-x_train_no, x_test_no, y_train_no, y_test_no = train_test_split(X_no, y_no, test_size=0.2, random_state=42)
-x_train_rs_no, x_test_rs_no, y_train_rs_no, y_test_rs_no = train_test_split(X_rs_no, y_no, test_size=0.2, random_state=42)
-x_train_mas_no, x_test_mas_no, y_train_mas_no, y_test_mas_no = train_test_split(X_mas_no, y_no, test_size=0.2, random_state=42)
+X_test_mas = max_abs_scaler(X_test)
+X_test_mas_cl = max_abs_scaler(X_test_cl)
