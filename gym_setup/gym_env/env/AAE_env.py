@@ -2,34 +2,32 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import AAE_archi
+import AAE_training_testing
 
 
 class AAE_env(gym.Env):
 
     def __init__(self):
 
-        # observation space as a vector
-        self.observation_space = AAE_archi.z_dim # this is the shape not the actual vector
+        self.observation_space = AAE_archi.reparameterization(0, 1, AAE_archi.z_dim) # this is the shape not the actual vector
 
-        # We have 2 actions, corresponding to
-        self.action_space = spaces.Discrete(2)
+        # We have 2 actions, corresponding to parameter updates and architecture change
+        self.action_space = spaces.Discrete(3)
 
         """
         The following dictionary maps abstract actions from `self.action_space` to 
         the direction we will walk in if that action is taken.
-        I.e. 0 corresponds to "right", 1 to "up" etc.
         """
         self._action_to_direction = {
-            0: np.array([1, 0]),
-            1: np.array([0, 1]),
-            2: np.array([-1, 0]),
-            3: np.array([0, -1]),
+            0: AAE_training_testing.optimizer_G,
+            1: AAE_training_testing.optimizer_D,
+            2: AAE_archi.EncoderGenerator
         }
 
-
+    # Agent prediction, true prediction
     def _get_obs(self):
         return {"agent": self._agent_location, "target": self._target_location}
-
+    # loss
     def _get_info(self):
         return {
             "distance": np.linalg.norm(
