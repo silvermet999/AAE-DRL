@@ -21,14 +21,15 @@ decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
 discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
 
 
+#
+# lrg, b1g, b2g, wg, lg, hg, gg
+# milestones=[lg, hg], gamma=gg
 
-
-def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g, wg, lg, hg, gg):
-    optimizer_G = torch.optim.Adam(
-        itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lrg,
-        betas=(b1g, b2g), weight_decay=wg)
+def train_model(lr, beta1, beta2, weight_decay, low, high, gamma):
+    # optimizer_G = torch.optim.Adam(
+    #     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=lr, betas=(beta1, beta2), weight_decay = weight_decay)
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, beta2), weight_decay = weight_decay)
-    scheduler_G = MultiStepLR(optimizer_G, milestones=[lg, hg], gamma=gg)
+    # scheduler_G = MultiStepLR(optimizer_G, milestones=[low, high], gamma=gamma)
     scheduler_D = MultiStepLR(optimizer_D, milestones=[low, high], gamma=gamma)
 
     def reset_parameters(m):
@@ -38,11 +39,10 @@ def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g,
     encoder_generator.apply(reset_parameters)
     discriminator.apply(reset_parameters)
 
-    best_lossg = None
-    best_lossd = None
-    best_params = {'lrg': lrg, 'beta1g': b1g, 'beta2g': b2g, "weight_decayg": wg, "lowg": lg, "highg": hg,
-                       "gammag": gg,
-                       'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay": weight_decay, "low": low, "high": high,
+    best_loss = None
+    # best_params = {'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay": weight_decay, "low": low, "high": high,
+    #                    "gamma": gamma}
+    best_params = {'lr': lr, 'beta1': beta1, 'beta2': beta2, "weight_decay": weight_decay, "low": low, "high": high,
                        "gamma": gamma}
 
     for epoch in range(10):
@@ -60,18 +60,18 @@ def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g,
             fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros(
                 (train_data_tensor.shape[0], 1))
 
-            optimizer_G.zero_grad()
+            # optimizer_G.zero_grad()
             encoded = encoder_generator(real)
             decoded = decoder(encoded)
-            g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(decoded, real)
-
-            g_loss.backward()
-            optimizer_G.step()
+            # g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(decoded, real)
+            #
+            # g_loss.backward()
+            # optimizer_G.step()
 
             optimizer_D.zero_grad()
 
             log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-            z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).to(cuda) if cuda else log_normal.sample(
+            z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).cuda() if cuda else log_normal.sample(
                 (batch_data.shape[0], AAE_archi.z_dim))
 
             # real and fake loss should be close
@@ -83,18 +83,24 @@ def train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g,
             d_loss.backward()
             optimizer_D.step()
 
-        scheduler_G.step()
+        # scheduler_G.step()
         scheduler_D.step()
 
-    if d_loss < 0.7 and g_loss < 0.4:
-        best_lossg = g_loss
-        best_lossd = d_loss
-        best_params = {'lrg': lrg, 'beta1g': b1g, 'beta2g': b2g, 'weight_decayg': wg, 'lowg': lg, 'highg': hg,
-                       'gammag': gg,
-                       'lr': lr, 'beta1': beta1, 'beta2': beta2, 'weight_decay': weight_decay, 'low': low, 'high': high,
-                       'gamma': gamma}
+    # if g_loss < 0.4:
+    #     best_lossg = g_loss
+    #     best_paramsg.update({'lr': lr, 'beta1': beta1, 'beta2': beta2, 'weight_decay': weight_decay, 'low': low,
+    #                         'high': high,
+    #                         'gamma': gamma})
+    if d_loss < 0.7:
+        best_loss = d_loss
+        best_params.update({'lr': lr, 'beta1': beta1, 'beta2': beta2, 'weight_decay': weight_decay, 'low': low,
+                            'high': high,
+                            'gamma': gamma})
 
-    return best_params, best_lossg, best_lossd
+    return best_params, best_loss
+
+# 'lrg': lrg, 'beta1g': b1g, 'beta2g': b2g, 'weight_decayg': wg, 'lowg': lg, 'highg': hg,
+#                              'gammag': gg
 
 
 def objective(space):
@@ -105,16 +111,16 @@ def objective(space):
     low = space['low']
     high = space['high']
     gamma = space['gamma']
-    lrg = space['lr']
-    b1g = space['beta1']
-    b2g = space['beta2']
-    wg = space['weight_decay']
-    lg = space['low']
-    hg = space['high']
-    gg = space['gamma']
+    # lrg = space['lr']
+    # b1g = space['beta1']
+    # b2g = space['beta2']
+    # wg = space['weight_decay']
+    # lg = space['low']
+    # hg = space['high']
+    # gg = space['gamma']
 
-    best_param, best_lossg, best_lossd = train_model(lr, beta1, beta2, weight_decay, low, high, gamma, lrg, b1g, b2g, wg, lg, hg, gg)
-    return -best_lossg.mean().item(), -best_lossd.mean().item()
+    best_param, best_loss = train_model(lr, beta1, beta2, weight_decay, low, high, gamma)
+    return -best_loss.mean().item()
 
 
 
@@ -135,5 +141,8 @@ best = fmin(fn=objective,
             max_evals=50,
             trials=trials)
 
+
+#  g: {'beta1': 0.9758534841202955, 'beta2': 0.9918395879014463, 'gamma': 0.09240555734722164, 'high': 89.27985628302403, 'low': 28.291395571088543, 'lr': 0.00920828229062108, 'weight_decay': 0.0008904987305687305}
+# d: {'beta1': 0.8943741362785895, 'beta2': 0.9995314706647865, 'gamma': 0.017159877576271722, 'high': 88.87749537059518, 'low': 39.93242882049465, 'lr': 1.0846450506796643e-05, 'weight_decay': 0.0004259377371418141}
 
 
