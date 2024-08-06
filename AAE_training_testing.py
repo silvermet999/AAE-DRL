@@ -9,14 +9,19 @@ import pandas as pd
 import torch
 from torch.nn import BCELoss, L1Loss
 from torch import cuda
-from torchsummary import summary
 import mlflow
 import main
 import itertools
+import json
+os.environ['CUDA_LAUNCH_BLOCKING']="1"
+os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
-# import optim_hyperp
 
-cuda = True if cuda.is_available() else False
+
+cuda = False
+df_train = main.X_train_rs_cl
+df_test = main.X_test_rs_cl
+
 
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
@@ -25,29 +30,31 @@ cuda = True if cuda.is_available() else False
 
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
+with open('hyperparams_g.json', 'r') as f:
+    hyperparams_g = json.load(f)
+
+with open('hyperparams_d.json', 'r') as f:
+    hyperparams_d = json.load(f)
 
 encoder_generator = AAE_archi.EncoderGenerator().cuda() if cuda else AAE_archi.EncoderGenerator()
-summary(encoder_generator, input_size=(AAE_archi.in_out,))
 decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
-summary(decoder, input_size=(AAE_archi.z_dim,))
 discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
-summary(discriminator, input_size=(AAE_archi.z_dim,))
 
 
 # optimizer_G = torch.optim.Adam(
-#     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=optim_hyperp.best["lr"], betas=(optim_hyperp.best["beta1"], optim_hyperp.best["beta2"]), weight_decay=optim_hyperp.best["weight_decay"])
-# optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=optim_hyperp.best["lr"], betas=(optim_hyperp.best["beta1"], optim_hyperp.best["beta2"]), weight_decay=optim_hyperp.best["weight_decay"])
-# scheduler_D = MultiStepLR(optimizer_D, milestones=[optim_hyperp.best["low"], optim_hyperp.best["high"]], gamma=optim_hyperp.best["gamma"])
-# scheduler_G = MultiStepLR(optimizer_G, milestones=[optim_hyperp.best["low"], optim_hyperp.best["high"]], gamma=optim_hyperp.best["gamma"])
+#     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=hyperparams_g["lr"], betas=(hyperparams_g["beta1"], hyperparams_g["beta2"]), weight_decay=hyperparams_g["weight_decay"])
+# optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=hyperparams_d["lr"], betas=(hyperparams_d["beta1"], hyperparams_d["beta2"]), weight_decay=hyperparams_d["weight_decay"])
+# scheduler_D = MultiStepLR(optimizer_D, milestones=[hyperparams_d["low"], hyperparams_d["high"]], gamma=hyperparams_d["gamma"])
+# scheduler_G = MultiStepLR(optimizer_G, milestones=[hyperparams_g["low"], hyperparams_g["high"]], gamma=hyperparams_g["gamma"])
+
 
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=.00920828229062108, betas=(.9758534841202955, .9918395879014463), weight_decay=.0008904987305687305)
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=1.0846450506796643e-05, betas=(.8943741362785895, .9995314706647865), weight_decay=.0004259377371418141)
-scheduler_D = MultiStepLR(optimizer_D, milestones=[40, 89], gamma=.017159877576271722)
-scheduler_G = MultiStepLR(optimizer_G, milestones=[28, 89], gamma=.09240555734722164)
-
-
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.0009, betas=(0.53, 0.924))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0023, betas=(0.767, 0.981))
+# scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.01)
+#
+# scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.01)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
@@ -69,8 +76,7 @@ file_number = get_next_file_number()
 
 
 def sample_runs(n_row, z_dim):
-    log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-    z = log_normal.sample((n_row ** 2, z_dim)).to(device="cuda") if cuda else log_normal.sample((n_row ** 2, z_dim))
+    z = torch.normal(0, 1, (n_row ** 2, z_dim)).to(device="cuda") if cuda else torch.normal(0, 1, (n_row ** 2, z_dim))
     gen_input = decoder(z).cpu()
     gen_data = gen_input.data.numpy()
 
@@ -81,11 +87,11 @@ def sample_runs(n_row, z_dim):
 
 """--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(100):
-    n_batch = len(main.X_train_rs) // 16
+    n_batch = len(df_train) // 16
     for i in range(n_batch):
         str_idx = i * 16
         end_idx = str_idx + 16
-        batch_data = main.X_train_rs[str_idx:end_idx]
+        batch_data = df_train[str_idx:end_idx]
         train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data, dtype=torch.float)
 
         real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
@@ -95,18 +101,19 @@ for epoch in range(100):
         optimizer_G.zero_grad()
         encoded = encoder_generator(real)
         decoded = decoder(encoded)
-        g_loss = 0.01 * adversarial_loss(discriminator(encoded), valid) + 0.99 * recon_loss(decoded, real)
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(decoded, real)
 
         g_loss.backward()
         optimizer_G.step()
 
         optimizer_D.zero_grad()
 
-        log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-        z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).to(cuda) if cuda else log_normal.sample((batch_data.shape[0], AAE_archi.z_dim))
+        # log_normal = torch.distributions.LogNormal(loc=0, scale=1)
+        # z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).cuda() if cuda else log_normal.sample((batch_data.shape[0], AAE_archi.z_dim))
+        z = torch.normal(0, 1, (batch_data.shape[0], AAE_archi.z_dim)).cuda() if cuda else torch.normal(0, 1, (batch_data.shape[0], AAE_archi.z_dim))
 
         # real and fake loss should be close
-        # discriminator(z) should be close to 0
+        # discriminator(z) should be close to 0e
         real_loss = adversarial_loss(discriminator(z), valid)
         fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
         d_loss = 0.5 * (real_loss + fake_loss)
@@ -114,11 +121,11 @@ for epoch in range(100):
         d_loss.backward()
         optimizer_D.step()
 
-    scheduler_G.step()
-    scheduler_D.step()
+    # scheduler_G.step()
+    # scheduler_D.step()
     print(epoch, d_loss.item(), g_loss.item())
 
-    batches_done = epoch * len(main.X_train_rs)
+    batches_done = epoch * len(df_train)
     if batches_done % 400 == 0:
         sample_runs(n_row=179, z_dim=AAE_archi.z_dim)
 
@@ -143,9 +150,9 @@ n_splits = 5
 kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-for fold, (_, val_index) in enumerate(kf.split(main.X_test_rs)):
+for fold, (_, val_index) in enumerate(kf.split(df_test)):
     print(f"Fold {fold + 1}/{n_splits}")
-    df_val = main.X_test_rs[val_index]
+    df_val = df_test[val_index]
     fold_recon_loss = []
     fold_adversarial_loss = []
     encoder_generator.eval()
@@ -205,4 +212,6 @@ with mlflow.start_run():
         input_example=AAE_archi.z_dim,
         registered_model_name="supervisedD_tracking",
     )
+# Average Reconstruction Loss: 0.4099 ± 0.0106
+# Average Adversarial Loss: 0.7027 ± 0.0202
 

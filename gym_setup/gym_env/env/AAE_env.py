@@ -19,9 +19,9 @@ class AAE_env(gym.Env):
         the direction we will walk in if that action is taken.
         """
         self._action_to_direction = {
-            0: AAE_training_testing.optimizer_G,
-            1: AAE_training_testing.optimizer_D,
-            2: AAE_archi.EncoderGenerator
+            0: AAE_training_testing.hyperparams_g,
+            1: AAE_training_testing.hyperparams_d,
+            2: AAE_training_testing.encoder_generator
         }
 
     # Agent prediction, true prediction

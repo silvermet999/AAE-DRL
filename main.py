@@ -175,3 +175,7 @@ X_train_mas_cl = max_abs_scaler(X_train_cl)
 
 X_test_mas = max_abs_scaler(X_test)
 X_test_mas_cl = max_abs_scaler(X_test_cl)
+
+
+X_train_df = pd.DataFrame(X_train_rs_cl, columns=X_train.columns)
+df_n = X_train_df.merge(y_train_cl, on=X_train_df.index)

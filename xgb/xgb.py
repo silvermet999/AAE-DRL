@@ -9,20 +9,11 @@ from sklearn.metrics import classification_report
 from imblearn.over_sampling import SMOTE, ADASYN
 import main
 import torch
+import new_dataset
 
 cuda = True if torch.cuda.is_available() else False
 
-
-synth = pd.read_csv("runs/rs38.csv")
-df_synth = pd.DataFrame(synth)
-# df_synth = df_synth.rename(columns = dict(zip(df_synth.columns, main.X.columns)))
-X = pd.DataFrame(main.X_train_rs)
-X = X.rename(columns = dict(zip(X.columns, main.X.columns)))
-frames_un = [df_synth, X]
-df_synth_plus = pd.concat(frames_un)
-
-
-
+df = new_dataset.df_synth
 
 
 def xgb():
@@ -52,7 +43,7 @@ def xgb():
     scores = []
 
     for train_index, val_index in kf.split(main.df):
-        X_tr, X_val = df_synth.iloc[train_index], df_synth.iloc[val_index]
+        X_tr, X_val = df.iloc[train_index], df.iloc[val_index]
         y_tr, y_val = y[train_index], y[val_index]
         sample_weights_tr = sample_weights[train_index]
 
@@ -97,7 +88,7 @@ def objective(space):
     le = LabelEncoder()
     y = le.fit_transform(main.y["Category"])
 
-    X_train, X_test, y_train, y_test = train_test_split(df_synth[:39744], y, test_size=.2)
+    X_train, X_test, y_train, y_test = train_test_split(main.df[:39744], y, test_size=.2)
 
     evaluation = [(X_train, y_train), (X_test, y_test)]
 
