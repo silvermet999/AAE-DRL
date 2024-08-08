@@ -1,8 +1,10 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-import AAE_archi
-import AAE_training_testing
+from AAE import AAE_archi
+import json
+
+
 
 
 class AAE_env(gym.Env):
@@ -19,9 +21,9 @@ class AAE_env(gym.Env):
         the direction we will walk in if that action is taken.
         """
         self._action_to_direction = {
-            0: AAE_training_testing.hyperparams_g,
-            1: AAE_training_testing.hyperparams_d,
-            2: AAE_training_testing.encoder_generator
+            0: AAE_archi.hyperparams_g,
+            1: AAE_archi.hyperparams_d,
+            2: AAE_archi.encoder_generator
         }
 
     # Agent prediction, true prediction
@@ -71,3 +73,5 @@ class AAE_env(gym.Env):
 
     def close(self):
         pass
+
+

@@ -39,6 +39,6 @@ def adaboost():
     clf.fit(main.x_train, y_train)
     y_pred = clf.predict(main.x_test)
     class_report = classification_report(y_test, y_pred)
-    with open('../adaboost/adaboost_classification_report.txt', 'w') as f:
+    with open('adaboost_classification_report.txt', 'w') as f:
         f.write(class_report)
     return class_report

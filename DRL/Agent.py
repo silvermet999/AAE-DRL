@@ -1,11 +1,32 @@
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
+import gymnasium
 from gym_setup.gym_env.env import AAE_env
 from gymnasium.wrappers import RecordEpisodeStatistics
 
 import numpy as np
+
+# gym-examples/
+#   README.md
+#   setup.py
+#   gym_examples/
+#     __init__.py
+#     envs/
+#       __init__.py
+#       grid_world.py
+#     wrappers/
+#       __init__.py
+#       relative_position.py
+#       reacher_weighted_reward.py
+#       discrete_action.py
+#       clip_reward.py
+
+
+
+
+env = gymnasium.make('AAE_env_v0')
+
 class RL_Agent:
     def __init__(
         self,
