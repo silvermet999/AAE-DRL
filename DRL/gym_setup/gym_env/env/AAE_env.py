@@ -1,8 +1,11 @@
 import gymnasium as gym
+from gym.spaces import Box
 from gymnasium import spaces
 import numpy as np
 from AAE import AAE_archi
-import json
+from AAE import AAE_training_testing
+
+import torch
 
 
 
@@ -10,8 +13,8 @@ import json
 class AAE_env(gym.Env):
 
     def __init__(self):
-
-        self.observation_space = AAE_archi.reparameterization(0, 1, AAE_archi.z_dim) # this is the shape not the actual vector
+        # Box is used to define a continuous space with bounds. If the latent space is not bounded, you can set the bounds to -float('inf') and float('inf')
+        self.observation_space = Box(low=-np.inf, high=np.inf, shape=(AAE_archi.z_dim,), dtype=np.float32)
 
         # We have 2 actions, corresponding to parameter updates and architecture change
         self.action_space = spaces.Discrete(3)
@@ -28,7 +31,8 @@ class AAE_env(gym.Env):
 
     # Agent prediction, true prediction
     def _get_obs(self):
-        return {"agent": self._agent_location, "target": self._target_location}
+        return {"obs": self.init_observation, "agent": self._agent_location, "target": self._target_location}
+
     # loss
     def _get_info(self):
         return {
@@ -37,39 +41,34 @@ class AAE_env(gym.Env):
             )
         }
 
+    def _calculate_reward(self):
+        distance = np.linalg.norm(self._agent_location - self._target_location, ord=1)
+        reward = -distance
+        if distance < self.goal_tolerance:
+            reward += self.goal_reward
+        return reward
+
     def reset(self, seed=None, options=None):
-        # We need the following line to seed self.np_random
-        super().reset(seed=seed)
+        self.mu = AAE_training_testing.mu
+        self.logvar = AAE_training_testing.logvar
+        self.init_observation = AAE_archi.reparameterization(self.mu, self.logvar, AAE_archi.z_dim)
+        self._agent_location = np.random.uniform(low=-1, high=1, size=(AAE_archi.z_dim,))
 
-        # Choose the agent's location uniformly at random
-        self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
-
-        # We will sample the target's location randomly until it does not coincide with the agent's location
-        self._target_location = self._agent_location
+        self._target_location = np.random.uniform(low=-1, high=1, size=(AAE_archi.z_dim,))
         while np.array_equal(self._target_location, self._agent_location):
-            self._target_location = self.np_random.integers(
-                0, self.size, size=2, dtype=int
-            )
+            self._target_location = np.random.uniform(low=-1, high=1, size=(AAE_archi.z_dim,))
 
         observation = self._get_obs()
         info = self._get_info()
-
         return observation, info
 
     def step(self, action):
-        # Map the action (element of {0,1,2,3}) to the direction we walk in
-        direction = self._action_to_direction[action]
-        # We use `np.clip` to make sure we don't leave the grid
-        self._agent_location = np.clip(
-            self._agent_location + direction, 0, self.size - 1
-        )
-        # An episode is done iff the agent has reached the target
-        terminated = np.array_equal(self._agent_location, self._target_location)
-        reward = 1 if terminated else 0  # Binary sparse rewards
+        self._agent_location += action
+        reward = self._calculate_reward()
+        terminated = np.linalg.norm(self._agent_location - self._target_location, ord=1) < self.goal_tolerance
         observation = self._get_obs()
         info = self._get_info()
-
-        return observation, reward, terminated, False, info
+        return observation, reward, terminated, info
 
     def close(self):
         pass
