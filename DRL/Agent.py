@@ -4,8 +4,9 @@ from tqdm import tqdm
 import gymnasium
 from gym_setup.gym_env.env import AAE_env
 from gymnasium.wrappers import RecordEpisodeStatistics
-
+import os
 import numpy as np
+os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
 # gym-examples/
 #   README.md
