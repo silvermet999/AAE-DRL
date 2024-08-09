@@ -1,15 +1,14 @@
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import KFold, GridSearchCV, train_test_split
+from sklearn.model_selection import KFold, train_test_split
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 import xgboost
 from sklearn.metrics import classification_report
-from imblearn.over_sampling import SMOTE, ADASYN
+from imblearn.over_sampling import SMOTE
 import main
 import torch
-import new_dataset
+from clfs import new_dataset
 
 cuda = True if torch.cuda.is_available() else False
 
