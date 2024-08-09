@@ -178,42 +178,7 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/corr.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="/desc_mem.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="/descriptive_stats.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="/dtypes.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="/f_corr.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="/null.csv">
+        <entry key="/DRL/gym_setup/gym_env/env/f_corr.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />

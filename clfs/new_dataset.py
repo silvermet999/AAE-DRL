@@ -1,7 +1,7 @@
 import pandas as pd
 import main
 
-synth = pd.read_csv("runs/rs38.csv")
+synth = pd.read_csv("../AAE/runs/rs38.csv")
 df_synth = pd.DataFrame(synth)
 # df_synth = df_synth.rename(columns = dict(zip(df_synth.columns, main.X.columns)))
 X = pd.DataFrame(main.X_train_rs)
