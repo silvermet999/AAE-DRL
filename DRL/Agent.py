@@ -47,7 +47,7 @@ class RL_Agent:
             final_epsilon: The final epsilon value
             discount_factor: The discount factor for computing the Q-value
         """
-        self.q_values = defaultdict(lambda: np.zeros(AAE_env.action_space.n))
+        self.q_values = defaultdict(lambda: np.zeros(env.action_space.n))
 
         self.lr = learning_rate
         self.discount_factor = discount_factor
@@ -65,7 +65,7 @@ class RL_Agent:
         """
         # with probability epsilon return a random action to explore the environment
         if np.random.random() < self.epsilon:
-            return AAE_env.action_space.sample()
+            return env.action_space.sample()
 
         # with probability (1 - epsilon) act greedily (exploit)
         else:
@@ -73,11 +73,11 @@ class RL_Agent:
 
     def update(
         self,
-        obs: tuple[int, int, bool],
+        obs: tuple[int, int, bool, float],
         action: int,
         reward: float,
         terminated: bool,
-        next_obs: tuple[int, int, bool],
+        next_obs: tuple[int, int, bool, float],
     ):
         """Updates the Q-value of an action."""
         future_q_value = (not terminated) * np.max(self.q_values[next_obs])
@@ -107,7 +107,7 @@ agent = RL_Agent(
     final_epsilon=final_epsilon,
 )
 
-env = RecordEpisodeStatistics(AAE_env, deque_size=n_episodes)
+env = RecordEpisodeStatistics(env, deque_size=n_episodes)
 for episode in tqdm(range(n_episodes)):
     obs, info = env.reset()
     done = False
