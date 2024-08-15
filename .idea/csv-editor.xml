@@ -178,13 +178,6 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/DRL/gym_setup/gym_env/env/f_corr.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
       </map>
     </option>
   </component>

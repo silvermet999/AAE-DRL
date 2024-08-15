@@ -129,11 +129,11 @@ class AAE_env(gym.Env):
 
         # training low, val high
         if (AAE_training_testing.avg_g_loss < 0.4 and AAE_training_testing.avg_recon_loss > 0.4):
-            current_lr = AAE_archi.encoder_generator
-            new_layers = current_lr - self.layers
-            AAE_archi.encoder_generator = new_layers
-            print(f"Layer number decreased to: {new_layers}")
-
+            num_layers_to_remove = 4
+            existing_layers = list(AAE_archi.encoder_generator.seq.children())
+            new_layers = existing_layers[:-num_layers_to_remove]
+            AAE_archi.encoder_generator.seq = nn.Sequential(*new_layers)
+            print(f"Removed the last {num_layers_to_remove} layers. Remaining layers: {len(new_layers)}")
         else:
             pass
 
@@ -143,6 +143,7 @@ class AAE_env(gym.Env):
         logvar = AAE_training_testing.logvar
         self._agent_location = AAE_archi.reparameterization(mu, logvar, AAE_archi.z_dim).cpu().detach().numpy()
 
+        # change to the matrix of the discriminator/clf pred
         self._target_location = np.random.uniform(low=-1, high=1, size=(AAE_archi.z_dim,))
         while np.array_equal(self._target_location, self._agent_location):
             self._target_location = np.random.uniform(low=-1, high=1, size=(AAE_archi.z_dim,))
@@ -155,7 +156,6 @@ class AAE_env(gym.Env):
 
     def step(self, action):
         update_params_layers = self._action_to_direction.get(action)
-        print(update_params_layers)
 
         if update_params_layers:
             self.update_action()
@@ -166,6 +166,7 @@ class AAE_env(gym.Env):
         truncated = self.current_step >= self.max_steps
         observation = self._get_obs()
         info = self._get_info()
+
         return observation, reward, terminated, truncated, info
 
 

@@ -64,21 +64,26 @@ class RL_Agent:
         otherwise a random action with probability epsilon to ensure exploration.
         """
         # with probability epsilon return a random action to explore the environment
+        obs = tuple(sorted(obs.items()))
         if np.random.random() < self.epsilon:
             return env.action_space.sample()
 
         # with probability (1 - epsilon) act greedily (exploit)
         else:
+            # if obs not in self.q_values:
+            #     self.q_values[obs] = np.zeros(self.action_space.n)
             return int(np.argmax(self.q_values[obs]))
 
     def update(
         self,
-        obs: tuple[int, int, bool, float],
+        obs: tuple[int, int, bool],
         action: int,
         reward: float,
         terminated: bool,
-        next_obs: tuple[int, int, bool, float],
+        next_obs: tuple[int, int, bool],
     ):
+        print(list(self.q_values.keys()))
+
         """Updates the Q-value of an action."""
         future_q_value = (not terminated) * np.max(self.q_values[next_obs])
         temporal_difference = (

@@ -6,48 +6,38 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report
 from imblearn.over_sampling import SMOTE, ADASYN
-import main
+from AAE import main
 
 
+# [I 2024-08-13 01:27:39,309] Trial 33 finished with value: 0.9802483588820078 and parameters: {'classifier': 'gb', 'gb_n_estimators': 200, 'gb_learning_rate': 0.049662646712519194, 'gb_max_depth': 9}. Best is trial 33 with value: 0.9802483588820078.
+
+X_train = main.X_train_rs
+y_train = main.y_train
+X_test = main.X_test_rs
+y_test = main.y_test
+
+X_train, y_train = SMOTE().fit_resample(X_train, y_train)
 
 
-space_gbc = {
-    "learning_rate": [0.25, 0.1, 0.05, 0.01],
-    "n_estimators": [8, 16, 32, 64, 100, 200],
-    "max_depth": list(range(1, 33)),
-    "min_samples_split": np.arange(0.1, 1.1, 0.1),
-    "min_samples_leaf": np.arange(0.1, 0.6, 0.1),
-    "max_features": list(range(1, main.x_train.shape[1] + 1))
-}
+clf = GradientBoostingClassifier(
+    max_depth=9,
+    n_estimators=200,
+    learning_rate=.049662646712519194,
+    # subsample=1.0,
+    # criterion='friedman_mse',
+    # min_samples_split=2,
+    # min_samples_leaf=1,
+    # min_weight_fraction_leaf=0.0,
+    # min_impurity_decrease=0.0,
+    # init=None,
+    # random_state=None,
+    # max_features=None,
+    # verbose=0,
+    # max_leaf_nodes=None,
+    # warm_start=False
 
-def gbc():
-    clf = GradientBoostingClassifier(
-        max_depth=16,
-        n_estimators=100,
-        learning_rate=.01,
-        min_samples_leaf=10,
-        max_features="sqrt",
-        min_samples_split=10,
-    )
-    le = LabelEncoder()
-    y = le.fit_transform(main.y["Category"])
-    sample_weights = np.ones_like(y, dtype=float)
-    sample_weights[3] = 2.0
-    sample_weights[9] = 2.0
-    sample_weights[13] = 3.0
-
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    scores = []
-
-    for train_index, val_index in kf.split(main.x_train):
-        X_tr, X_val = main.x_train[train_index], main.x_train[val_index]
-        y_tr, y_val = y[train_index], y[val_index]
-        sample_weights_tr = sample_weights[train_index]
-
-        clf.fit(X_tr, y_tr, sample_weight=sample_weights_tr)
-        y_pred = clf.predict(X_val)
-        scores.append(accuracy_score(y_val, y_pred))
-        class_report = classification_report(y_val, y_pred)
-        with open('../gbc_classification_report.txt', 'w') as f:
-            f.write(class_report)
-    return class_report
+)
+clf.fit(X_train, y_train)
+pred = clf.predict(X_test)
+class_report = classification_report(y_test, pred)
+print(class_report)
