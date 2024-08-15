@@ -1,8 +1,7 @@
 import json
-
+import os
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
 import optuna
 import itertools
 
@@ -10,8 +9,15 @@ import main
 
 from optuna.trial import TrialState
 import torch.optim as optim
-from sklearn.model_selection import KFold
 import numpy as np
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+
+os.environ['CUDA_LAUNCH_BLOCKING']="1"
+os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
 cuda = True if torch.cuda.is_available() else False
 
@@ -25,6 +31,12 @@ def reparameterization(mu, logvar, z_dim):
 class Encoder(nn.Module):
     def __init__(self, trial, n_layers_e, in_features_e):
         super(Encoder, self).__init__()
+
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        dist.init_process_group("gloo", rank=rank, world_size=world_size)
+        device = torch.device(f'cuda:{rank}')
+
         layers_e = []
 
         for i in range(n_layers_e):
@@ -36,7 +48,7 @@ class Encoder(nn.Module):
             layers_e.append(nn.Dropout(p))
             in_features_e = out_features
 
-        self.encoder = nn.Sequential(*layers_e)
+        self.encoder = nn.Sequential(*layers_e).to(device)
         self.mu_layer = nn.Linear(in_features_e, 32)
         self.logvar_layer = nn.Linear(in_features_e, 32)
 
@@ -51,6 +63,11 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, trial, n_layers_de, in_features_de):
         super(Decoder, self).__init__()
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        dist.init_process_group("gloo", rank=rank, world_size=world_size)
+        device = torch.device(f'cuda:{rank}')
+
         layers_de = []
 
         for i in range(n_layers_de):
@@ -63,7 +80,7 @@ class Decoder(nn.Module):
             in_features_de = out_features
         layers_de.append(nn.Linear(in_features_de, 119))
         layers_de.append(nn.Tanh())
-        self.decoder = nn.Sequential(*layers_de)
+        self.decoder = nn.Sequential(*layers_de).to(device)
 
     def forward(self, x):
         return self.decoder(x)
@@ -72,6 +89,11 @@ class Decoder(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self, trial, n_layers_di, in_features_di):
         super(Discriminator, self).__init__()
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        dist.init_process_group("gloo", rank=rank, world_size=world_size)
+        device = torch.device(f'cuda:{rank}')
+
         layers_di = []
 
         for i in range(n_layers_di):
@@ -84,13 +106,13 @@ class Discriminator(nn.Module):
             in_features_di = out_features
         layers_di.append(nn.Linear(in_features_di, 1))
         layers_di.append(nn.Sigmoid())
-        self.discriminator = nn.Sequential(*layers_di)
+        self.discriminator = nn.Sequential(*layers_di).to(device)
 
     def forward(self, x):
         return self.discriminator(x)
 
 
-def define_model(trial):
+def define_model(rank, trial):
     n_layers_e = trial.suggest_int("n_layers_e", 20, 50)
     n_layers_de = trial.suggest_int("n_layers_de", 20, 50)
     n_layers_di = trial.suggest_int("n_layers_di", 10, 30)
@@ -98,9 +120,12 @@ def define_model(trial):
     in_features_de = 32
     in_features_di = 32
 
-    encoder = Encoder(trial, n_layers_e, in_features_e).cuda() if cuda else Encoder(trial, n_layers_e, in_features_e)
-    decoder = Decoder(trial, n_layers_de, in_features_de).cuda() if cuda else Decoder(trial, n_layers_de, in_features_de)
-    discriminator = Discriminator(trial, n_layers_di, in_features_di).cuda() if cuda else Discriminator(trial, n_layers_di, in_features_di)
+    encoder = Encoder(trial, n_layers_e, in_features_e)
+    encoder = DDP(encoder, device_ids=[rank])
+    decoder = Decoder(trial, n_layers_de, in_features_de)
+    decoder = DDP(decoder, device_ids=[rank])
+    discriminator = Discriminator(trial, n_layers_di, in_features_di)
+    discriminator = DDP(discriminator, device_ids=[rank])
 
     return encoder, decoder, discriminator
 
@@ -145,7 +170,7 @@ def objective(trial):
             optimizer_G.zero_grad()
             encoded = enc(real)
             decoded = dec(encoded)
-            g_loss = 0.001 * adversarial_loss(disc(encoded).sigmoid(), valid) + 0.999 * recon_loss(decoded, real)
+            g_loss = 0.001 * adversarial_loss(disc(encoded), valid) + 0.999 * recon_loss(decoded, real)
 
             g_loss.backward()
             optimizer_G.step()
@@ -157,7 +182,7 @@ def objective(trial):
             # real and fake loss should be close
             # discriminator(z) should be close to 0
             real_loss = adversarial_loss(disc(z), valid)
-            fake_loss = adversarial_loss(disc(encoded.detach().sigmoid()), fake)
+            fake_loss = adversarial_loss(disc(encoded.detach()), fake)
             d_loss = 0.5 * (real_loss + fake_loss)
 
             d_loss.backward()
@@ -185,25 +210,24 @@ def objective(trial):
 
     return recon_mean, adv_mean
 
+if __name__ == "__main__":
+    study = optuna.create_study(directions=["minimize", "minimize"])
+    study.optimize(objective, n_trials=10)
 
+    complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
 
-study = optuna.create_study(directions=["minimize", "minimize"])
-study.optimize(objective, n_trials=10)
+    print("Study statistics: ")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Number of complete trials: ", len(complete_trials))
 
-complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
-
-print("Study statistics: ")
-print("  Number of finished trials: ", len(study.trials))
-print("  Number of complete trials: ", len(complete_trials))
-
-print("Pareto front:")
-for trial in study.best_trials:
-    print("  Trial number: ", trial.number)
-    print("  Values: ", trial.values)
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print("    {}: {}".format(key, value))
-    print()
+    print("Pareto front:")
+    for trial in study.best_trials:
+        print("  Trial number: ", trial.number)
+        print("  Values: ", trial.values)
+        print("  Params: ")
+        for key, value in trial.params.items():
+            print("    {}: {}".format(key, value))
+        print()
 
 with open('layers+params.json', 'w') as f:
     json.dump(study.best_trials, f, indent=4)

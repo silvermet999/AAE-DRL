@@ -240,14 +240,11 @@ class Discriminator(Module):
 
 
 encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
-summary(encoder_generator, input_size=(in_out,))
 decoder = Decoder().cuda() if cuda else Decoder()
-summary(decoder, input_size=(z_dim,))
 discriminator = Discriminator().cuda() if cuda else Discriminator()
-summary(discriminator, input_size=(z_dim,))
 
-with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_g.json', 'r') as f:
-    hyperparams_g = json.load(f)
-
-with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_d.json', 'r') as f:
-    hyperparams_d = json.load(f)
+# with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_g.json', 'r') as f:
+#     hyperparams_g = json.load(f)
+#
+# with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_d.json', 'r') as f:
+#     hyperparams_d = json.load(f)

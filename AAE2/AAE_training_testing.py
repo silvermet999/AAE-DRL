@@ -17,7 +17,6 @@ os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
 
 cuda = True if torch.cuda.is_available() else False
-torch.empty(15000, 15000, device="cuda")
 torch.cuda.empty_cache()
 
 
@@ -85,11 +84,11 @@ def sample_runs(n_row, z_dim):
 
     gen_df = pd.DataFrame(gen_data, columns=main.df_n.columns)
     filename = f"/home/silver/PycharmProjects/AAEDRL/AAE/runs/uns{file_number}.csv"
-    # gen_df.to_csv(filename, index=False)
+    gen_df.to_csv(filename, index=False)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
-for epoch in range(3):
+for epoch in range(100):
     n_batch = len(df_train) // 99
     for i in range(n_batch):
         str_idx = i * 99

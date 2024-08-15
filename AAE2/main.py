@@ -11,7 +11,8 @@ from sklearn.model_selection import train_test_split
 
 
 """--------------------------------------------data exploration/cleaning--------------------------------------------"""
-directory = '/home/silver/PycharmProjects/AAEDRL/AndMal2020-dynamic-BeforeAndAfterReboot'
+directory="C:\\Users\\professor\\AAE-DRL\\AndMal2020-dynamic-BeforeAndAfterReboot"
+
 csv_files = [file for file in os.listdir(directory) if file.endswith(('before_reboot_Cat.csv', 'after_reboot_Cat.csv'))]
 
 dfs = []
@@ -133,11 +134,11 @@ def remove_outliers_zscore(df, threshold=1.4):
 """-----------------------------------------------vertical data split-----------------------------------------------"""
 y = df["Category"]
 X = df.drop("Category", axis=1)
-# y = pd.get_dummies(y).astype(int)
-# cols = ['Backdoor', 'Trojan_Banker', 'Zero_Day', 'No_Category', 'PUA',
-#        'FileInfector', 'Ransomware', 'Trojan_Dropper', 'Trojan_SMS',
-#        'Trojan_Spy', 'Trojan', 'Adware', 'Riskware', 'Scareware']
-# y = y.rename(columns = dict(zip(y.columns, cols)))
+y = pd.get_dummies(y).astype(int)
+cols = ['Backdoor', 'Trojan_Banker', 'Zero_Day', 'No_Category', 'PUA',
+       'FileInfector', 'Ransomware', 'Trojan_Dropper', 'Trojan_SMS',
+       'Trojan_Spy', 'Trojan', 'Adware', 'Riskware', 'Scareware']
+y = y.rename(columns = dict(zip(y.columns, cols)))
 
 # y_cl = df_cl["Category"]
 # X_cl = df_cl.drop("Category", axis = 1)
