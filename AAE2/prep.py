@@ -1,5 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
+
+import torch
 from scipy import stats
 import numpy as np
 import pandas as pd
@@ -7,8 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import LabelEncoder, RobustScaler, MaxAbsScaler
 from sklearn.model_selection import train_test_split
-
-
+from torch.utils.data import Dataset
 
 """--------------------------------------------data exploration/cleaning--------------------------------------------"""
 directory="C:\\Users\\professor\\AAE-DRL\\AndMal2020-dynamic-BeforeAndAfterReboot"
@@ -131,57 +132,35 @@ def remove_outliers_zscore(df, threshold=1.4):
 # df_cl = remove_outliers_zscore(df)
 # df_cl = df_cl.drop(df_cl.columns[df_cl.nunique() == 1], axis = 1)
 
-"""-----------------------------------------------vertical data split-----------------------------------------------"""
+"""-----------------------------------------------clf data split-----------------------------------------------"""
 y = df["Category"]
 X = df.drop("Category", axis=1)
-y = pd.get_dummies(y).astype(int)
-cols = ['Backdoor', 'Trojan_Banker', 'Zero_Day', 'No_Category', 'PUA',
-       'FileInfector', 'Ransomware', 'Trojan_Dropper', 'Trojan_SMS',
-       'Trojan_Spy', 'Trojan', 'Adware', 'Riskware', 'Scareware']
-y = y.rename(columns = dict(zip(y.columns, cols)))
-
-# y_cl = df_cl["Category"]
-# X_cl = df_cl.drop("Category", axis = 1)
-# y_cl = pd.get_dummies(y_cl).astype(int)
-# y_cl = y_cl.rename(columns = dict(zip(y_cl.columns, cols)))
-
-
-
-"""-----------------------------------------------data preprocessing-----------------------------------------------"""
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
 # X_train_cl, X_test_cl, y_train_cl, y_test_cl = train_test_split(X_cl, y_cl, test_size=0.2, random_state=42)
 
+"""-----------------------------------------------AAE data split-----------------------------------------------"""
+cols = ['Backdoor', 'Trojan_Banker', 'Zero_Day', 'No_Category', 'PUA',
+       'FileInfector', 'Ransomware', 'Trojan_Dropper', 'Trojan_SMS',
+       'Trojan_Spy', 'Trojan', 'Adware', 'Riskware', 'Scareware']
+df_h = pd.get_dummies(df, columns = ["Category"]).astype(int)
+df_h = df_h.rename(columns = dict(zip(df_h.filter(regex="^Category"), cols)))
 
+train = df_h[:31795]
+test = df_h.iloc[31795:]
+
+
+# y_cl = df_cl["Category"]
+# X_cl = df_cl.drop("Category", axis = 1)
+
+
+"""-----------------------------------------------data preprocessing-----------------------------------------------"""
 def robust_scaler(df):
     scaler = RobustScaler()
     df = scaler.fit_transform(df)
     return df
-
-X_train_rs = robust_scaler(X_train)
-# X_train_rs_cl = robust_scaler(X_train_cl)
-
-X_test_rs = robust_scaler(X_test)
-# X_test_rs_cl = robust_scaler(X_test_cl)
-
-# np.isnan(X_rs).any()
 
 
 def max_abs_scaler(df):
     scaler = MaxAbsScaler()
     df = scaler.fit_transform(df)
     return df
-
-# X_train_mas = max_abs_scaler(X_train)
-# X_train_mas_cl = max_abs_scaler(X_train_cl)
-#
-# X_test_mas = max_abs_scaler(X_test)
-# X_test_mas_cl = max_abs_scaler(X_test_cl)
-
-
-X_train_df = pd.DataFrame(X_train_rs, columns=X_train.columns)
-df_n = X_train_df.merge(y_train, on=X_train_df.index)
-df_n = df_n.drop("key_0", axis = 1)
-
-X_test_df = pd.DataFrame(X_test_rs, columns=X_test.columns)
-df_t = X_test_df.merge(y_test, on=X_test_df.index)
-df_t = df_t.drop("key_0", axis = 1)
