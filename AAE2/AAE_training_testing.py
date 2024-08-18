@@ -1,15 +1,14 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
 from sklearn.model_selection import KFold
-from AAE import AAE_archi
+from AAE2 import AAE_archi
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.nn import BCELoss, L1Loss
 from torch import cuda
-import mlflow
-from AAE import main
+from AAE2 import prep
 import itertools
 os.environ['CUDA_LAUNCH_BLOCKING']="1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
@@ -20,8 +19,8 @@ cuda = True if torch.cuda.is_available() else False
 torch.cuda.empty_cache()
 
 
-df_train = main.df_n
-df_test = main.df_t
+df_train = prep.train
+df_test = prep.test
 
 
 
@@ -63,27 +62,13 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
-def get_next_file_number():
-    counter_file = "/home/silver/PycharmProjects/AAEDRL/AAE/runs/file_counter.txt"
-    if not os.path.exists(counter_file):
-        with open(counter_file, "w") as f:
-            f.write("0")
-        return 0
-    with open(counter_file, "r") as f:
-        counter = int(f.read())
-    with open(counter_file, "w") as f:
-        f.write(str(counter + 1))
-    return counter
-file_number = get_next_file_number()
-
-
 def sample_runs(n_row, z_dim):
     z = torch.normal(0, 1, (n_row ** 2, z_dim)).to(device="cuda") if cuda else torch.normal(0, 1, (n_row ** 2, z_dim))
     gen_input = decoder(z).cpu()
     gen_data = gen_input.data.numpy()
 
-    gen_df = pd.DataFrame(gen_data, columns=main.df_n.columns)
-    filename = f"/home/silver/PycharmProjects/AAEDRL/AAE/runs/uns{file_number}.csv"
+    gen_df = pd.DataFrame(gen_data, columns=prep.train.columns)
+    filename = f"1.csv"
     gen_df.to_csv(filename, index=False)
 
 
@@ -162,7 +147,7 @@ for fold, (_, val_index) in enumerate(kf.split(df_test)):
     encoder_generator.eval()
     decoder.eval()
     discriminator.eval()
-    n_batch = len(df_val) // 1
+    n_batch = len(df_val)
     for i in range(n_batch):
         str_idx = i * 1
         end_idx = str_idx + 1

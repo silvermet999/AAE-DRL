@@ -1,10 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
-import json
-import torch
 from torch.nn import BatchNorm1d, Linear, Module, Sequential, Tanh, Sigmoid, Dropout, LeakyReLU
 from torch import cuda, exp, normal
-from torchsummary import summary
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
@@ -13,6 +10,9 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 in_out = 119 # in for the enc/gen out for the dec
 # out_in_dim = 100 # in for the dec and disc out for the enc/gen
 z_dim = 32
+os.environ['CUDA_LAUNCH_BLOCKING']="1"
+os.environ['TORCH_USE_CUDA_DSA'] = "1"
+
 
 
 
@@ -239,9 +239,10 @@ class Discriminator(Module):
         return self.seq(input_)
 
 
-encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
-decoder = Decoder().cuda() if cuda else Decoder()
-discriminator = Discriminator().cuda() if cuda else Discriminator()
+encoder_generator = EncoderGenerator().to("cuda:0")
+decoder = Decoder().to("cuda:1")
+discriminator = Discriminator().to("cuda:0")
+
 
 # with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_g.json', 'r') as f:
 #     hyperparams_g = json.load(f)
