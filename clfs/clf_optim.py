@@ -5,13 +5,13 @@ import sklearn.ensemble
 import sklearn.model_selection
 import sklearn.svm
 import xgboost as xgb
-from AAE import main
+from AAE2 import prep
 import sklearn.metrics
 
-X_train = main.X_train_rs
-y_train = main.y_train
-X_test = main.X_test_rs
-y_test = main.y_test
+X_train = prep.RobustScaler(prep.X_train)
+y_train = prep.y_train
+X_test = prep.RobustScaler(prep.X_test)
+y_test = prep.y_test
 
 def objective(trial):
 

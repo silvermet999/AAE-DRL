@@ -159,6 +159,8 @@ def robust_scaler(df):
     df = scaler.fit_transform(df)
     return df
 
+X_train_rs = RobustScaler()
+
 
 def max_abs_scaler(df):
     scaler = MaxAbsScaler()
