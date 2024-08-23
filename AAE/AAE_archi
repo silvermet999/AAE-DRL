@@ -8,7 +8,6 @@ from torchsummary import summary
 
 
 """-----------------------------------initialize variables for inputs and outputs-----------------------------------"""
-cuda = True if cuda.is_available() else False
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 in_out = 105 # in for the enc/gen out for the dec
 # out_in_dim = 100 # in for the dec and disc out for the enc/gen
@@ -21,7 +20,7 @@ z_dim = 32
 """---------------------------------------------backprop and hidden layers-------------------------------------------"""
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    sampled_z = normal(0, 1, (mu.size(0), z_dim)).to("cuda")
+    sampled_z = normal(0, 1, (mu.size(0), z_dim)).to("cuda:0")
     z = sampled_z * std + mu
     return z
 
@@ -46,7 +45,16 @@ params = {
     'n_units_de_l3': 272, 'n_units_de_l4': 132, 'n_units_de_l5': 230, 'n_units_de_l6': 404, 'n_units_de_l7': 289,
     'n_units_de_l8': 266, 'n_units_de_l9': 294, 'n_units_de_l10': 359, 'n_units_de_l11': 271, 'n_units_de_l12': 240,
     'n_units_de_l13': 358, 'n_units_de_l14': 317, 'n_units_de_l15': 461, 'n_units_de_l16': 409, 'n_units_de_l17': 411,
-    'n_units_de_l18': 72, 'n_units_de_l19': 280, 'n_units_de_l20': 279
+    'n_units_de_l18': 72, 'n_units_de_l19': 280, 'n_units_de_l20': 279, 'n_layers_di': 18, 'n_units_di_l0': 37,
+    'dropout_l26': 0.3953108842666025, 'n_units_di_l1': 446, 'dropout_l27': 0.46275164457331813, 'n_units_di_l2': 298,
+    'dropout_l28': 0.41439725774646496, 'n_units_di_l3': 336, 'dropout_l29': 0.38235687521714845, 'n_units_di_l4': 395,
+    'dropout_l30': 0.4162961310002777, 'n_units_di_l5': 263, 'dropout_l31': 0.40417908930241075, 'n_units_di_l6': 197,
+    'dropout_l32': 0.3063286162663691, 'n_units_di_l7': 302, 'dropout_l33': 0.45484754782914616, 'n_units_di_l8': 497,
+    'dropout_l34': 0.23592196910697666, 'n_units_di_l9': 278, 'dropout_l35': 0.33283213596440575, 'n_units_di_l10': 320,
+    'dropout_l36': 0.38006464784065536, 'n_units_di_l11': 502, 'dropout_l37': 0.15037293254215617, 'n_units_di_l12': 81,
+    'dropout_l38': 0.4906454386348957, 'n_units_di_l13': 407, 'dropout_l39': 0.4439607716761734, 'n_units_di_l14': 302,
+    'dropout_l40': 0.18318849312157814, 'n_units_di_l15': 322, 'dropout_l41': 0.345179737062177, 'n_units_di_l16': 286,
+    'dropout_l42': 0.16306932470098257, 'n_units_di_l17': 65, 'dropout_l43': 0.4407439993652657
 
 }
 class EncoderGenerator(Module):
@@ -86,12 +94,9 @@ class Decoder(Module):
             seq.append(Linear(in_features, out_features))
             seq.append(LeakyReLU())
             seq.append(BatchNorm1d(out_features))
-            if i > 25:
-                dropout = params[f'dropout_l{i}']
-                seq.append(Dropout(dropout))
+
         seq += [
             Linear(out_features, in_out),
-            # Softmax()
         ]
         self.seq = Sequential(*seq)
 
@@ -102,35 +107,38 @@ class Decoder(Module):
 
 
 
-# class Discriminator(Module):
-#     def __init__(self):
-#         super(Discriminator, self).__init__()
-#         seq = []
-#         for i in range(params['n_layers_di']):
-#             in_features = z_dim if i == 0 else params[f'n_units_di_l{i - 1}']
-#             out_features = params[f'n_units_di_l{i}']
-#             seq.append(Linear(in_features, out_features))
-#             seq.append(LeakyReLU())
-#             seq.append(BatchNorm1d(out_features))
-#
-#         seq.append(Linear(out_features, 1))
-#         seq.append(Sigmoid())
-#         self.seq = Sequential(*seq)
-#
-#
-#     def forward(self, input_):
-#         return self.seq(input_)
+class Discriminator(Module):
+    def __init__(self):
+        super(Discriminator, self).__init__()
+        seq = []
+        for i in range(params['n_layers_di']):
+            in_features = z_dim if i == 0 else params[f'n_units_di_l{i - 1}']
+            out_features = params[f'n_units_di_l{i}']
+            seq.append(Linear(in_features, out_features))
+            seq.append(LeakyReLU())
+            seq.append(BatchNorm1d(out_features))
+            if i > 25:
+                dropout = params[f'dropout_l{i}']
+                seq.append(Dropout(dropout))
+
+        seq.append(Linear(out_features, 1))
+        seq.append(Sigmoid())
+        self.seq = Sequential(*seq)
 
 
-encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
-summary(encoder_generator, input_size=(in_out,))
-decoder = Decoder().cuda() if cuda else Decoder()
-summary(decoder, input_size=(z_dim,))
-# discriminator = Discriminator().cuda() if cuda else Discriminator()
-# summary(discriminator, input_size=(z_dim,))
-#
+    def forward(self, input_):
+        return self.seq(input_)
+
+
+encoder_generator = EncoderGenerator().to("cuda:0")
+decoder = Decoder().to("cuda:1")
+discriminator = Discriminator().to("cuda:1")
+
 # with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_g.json', 'r') as f:
 #     hyperparams_g = json.load(f)
 #
 # with open('/home/silver/PycharmProjects/AAEDRL/AAE/hyperparams_d.json', 'r') as f:
 #     hyperparams_d = json.load(f)
+
+
+#  {'n_layers_di': 18, 'n_units_di_l0': 37, 'dropout_l0': 0.3953108842666025, 'n_units_di_l1': 446, 'dropout_l1': 0.46275164457331813, 'n_units_di_l2': 298, 'dropout_l2': 0.41439725774646496, 'n_units_di_l3': 336, 'dropout_l3': 0.38235687521714845, 'n_units_di_l4': 395, 'dropout_l4': 0.4162961310002777, 'n_units_di_l5': 263, 'dropout_l5': 0.40417908930241075, 'n_units_di_l6': 197, 'dropout_l6': 0.3063286162663691, 'n_units_di_l7': 302, 'dropout_l7': 0.45484754782914616, 'n_units_di_l8': 497, 'dropout_l8': 0.23592196910697666, 'n_units_di_l9': 278, 'dropout_l9': 0.33283213596440575, 'n_units_di_l10': 320, 'dropout_l10': 0.38006464784065536, 'n_units_di_l11': 502, 'dropout_l11': 0.15037293254215617, 'n_units_di_l12': 81, 'dropout_l12': 0.4906454386348957, 'n_units_di_l13': 407, 'dropout_l13': 0.4439607716761734, 'n_units_di_l14': 302, 'dropout_l14': 0.18318849312157814, 'n_units_di_l15': 322, 'dropout_l15': 0.345179737062177, 'n_units_di_l16': 286, 'dropout_l16': 0.16306932470098257, 'n_units_di_l17': 65, 'dropout_l17': 0.4407439993652657, 'lrd': 0.0003537881190733828, 'beta1d': 0.7986571988762406, 'beta2d': 0.9520849581646436}. Best is trial 6 with value: 0.6930056875944137.
