@@ -1,10 +1,10 @@
 import torch
 from torch import exp, normal
-from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential
+from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh
 
 in_out = 105
 z_dim = 10
-hl_dim = (130, 230,330,430, 530, 630)
+hl_dim = (100, 100,100,100)
 hl_dimd = (10, 10,10,10)
 
 
@@ -37,11 +37,10 @@ class EncoderGenerator(Module):
             dim += i
         seq += (Linear(dim, 100), LeakyReLU(0.2))
         self.seq = Sequential(*seq)
-
-
         # projects output to the dim of latent space
         self.mu = Linear(100, z_dim)
         self.logvar = Linear(100, z_dim)
+
     def forward(self, x):
         x = self.seq(x)
         mu = self.mu(x)
@@ -57,8 +56,10 @@ class Decoder(Module):
         for i in list(hl_dimd):
             seq += [hl_loop(dim, i)]
             dim += i
-        seq += (Linear(dim, in_out))
+        seq += (Linear(dim, in_out), Tanh())
         self.seq = Sequential(*seq)
+    def forward(self, x):
+        return self.seq(x)
 
 
 class Discriminator(Module):
@@ -76,3 +77,9 @@ class Discriminator(Module):
             dim = i
         seq += [Linear(dim, 1), Sigmoid()]
         self.seq = Sequential(*seq)
+    def forward(self, x):
+        return self.seq(x)
+
+encoder_generator = EncoderGenerator().to("cuda:0")
+decoder = Decoder().to("cuda:1")
+discriminator = Discriminator().to("cuda:1")
