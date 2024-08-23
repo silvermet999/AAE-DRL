@@ -5,7 +5,7 @@ from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential
 in_out = 105
 z_dim = 10
 hl_dim = (100, 100,100,100)
-hl_dimd = (10, 10,10,10)
+hl_dimd = (10, 10,10,10,10,10,10,10,10,10)
 
 
 def reparameterization(mu, logvar, z_dim):
@@ -53,10 +53,10 @@ class Decoder(Module):
         super(Decoder, self).__init__()
         dim = z_dim
         seq = []
-        for i in list(hl_dimd):
+        for i in list(hl_dim):
             seq += [hl_loop(dim, i)]
             dim += i
-        seq += (Linear(dim, in_out), Tanh())
+        seq += (Linear(dim, in_out))
         self.seq = Sequential(*seq)
     def forward(self, x):
         return self.seq(x)
