@@ -1,16 +1,21 @@
 import torch
 from torch import exp, normal
 from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh
+from AAE import main
 
 in_out = 105
-z_dim = 10
-hl_dim = (100, 100,100,100)
-hl_dimd = (10, 10,10,10,10,10,10,10,10,10)
+z_dim = 32
+hl_dim = (100, 100, 100)
+hl_dimd = (32, 32, 32, 32, 32)
+cuda = True if torch.cuda.is_available() else False
+encoded_tensor = torch.tensor(main.y.values, dtype=torch.float32).cuda() if cuda else torch.tensor(main.y.values, dtype=torch.float32)
+label_dim = encoded_tensor.shape[1]
+
 
 
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    sampled_z = normal(0, 1, (mu.size(0), z_dim)).to("cuda:0")
+    sampled_z = normal(0, 1, (mu.size(0), z_dim)).cuda() if cuda else normal(0, 1, (mu.size(0), z_dim))
     z = sampled_z * std + mu
     return z
 
@@ -46,18 +51,19 @@ class EncoderGenerator(Module):
         mu = self.mu(x)
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar, z_dim)
-        return mu, logvar, z
+        return z
 
 class Decoder(Module):
     def __init__(self):
         super(Decoder, self).__init__()
-        dim = z_dim
+        dim = z_dim+ label_dim
         seq = []
         for i in list(hl_dim):
             seq += [hl_loop(dim, i)]
             dim += i
-        seq += (Linear(dim, in_out))
+        seq += (Linear(dim, in_out), Tanh())
         self.seq = Sequential(*seq)
+
     def forward(self, x):
         return self.seq(x)
 
@@ -71,7 +77,7 @@ class Discriminator(Module):
             seq += [
                 Linear(z_dim, i),
                 LeakyReLU(0.2, inplace=True),
-                Linear(10, 10),
+                Linear(32, 32),
                 LeakyReLU(0.2, inplace=True),
             ]
             dim = i
@@ -80,6 +86,3 @@ class Discriminator(Module):
     def forward(self, x):
         return self.seq(x)
 
-encoder_generator = EncoderGenerator().to("cuda:0")
-decoder = Decoder().to("cuda:1")
-discriminator = Discriminator().to("cuda:1")
