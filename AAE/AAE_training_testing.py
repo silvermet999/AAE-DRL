@@ -40,7 +40,7 @@ discriminator = AAE_archi.discriminator
 
 
 hyperperams = {'lr': 0.001, 'beta1': 0.5, 'beta2': 0.999,
-               'lrd':0.0001, 'beta1d': 0.9, 'beta2d': 0.999}
+               'lrd':0.001, 'beta1d': 0.9, 'beta2d': 0.999}
 
 
 optimizer_G = torch.optim.Adam(
