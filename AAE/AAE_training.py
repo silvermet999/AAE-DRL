@@ -22,7 +22,6 @@ torch.cuda.empty_cache()
 
 
 df_train = main.X_train_rs
-df_test = main.X_test_rs
 
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
@@ -33,19 +32,19 @@ adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
 
-encoder_generator = AAE_archi.encoder_generator
-decoder = AAE_archi.decoder
-discriminator = AAE_archi.discriminator
+encoder_generator = AAE_archi.EncoderGenerator().cuda() if cuda else AAE_archi.EncoderGenerator()
+decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
+discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
 
 
 
-hyperperams = {'lr': 0.001, 'beta1': 0.5, 'beta2': 0.999,
-               'lrd':0.001, 'beta1d': 0.9, 'beta2d': 0.999}
+hyperparams_g = {'lr': 0.001, 'beta1': 0.5, 'beta2': 0.999}
+hyperperams_d={'lrd':0.0001, 'beta1d': 0.9, 'beta2d': 0.98}
 
 
 optimizer_G = torch.optim.Adam(
-    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=hyperperams["lr"], betas=(hyperperams["beta1"], hyperperams["beta2"]))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=hyperperams["lrd"], betas=(hyperperams["beta1d"], hyperperams["beta2d"]))
+    itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=hyperparams_g["lr"], betas=(hyperparams_g["beta1"], hyperparams_g["beta2"]))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=hyperperams_d["lrd"], betas=(hyperperams_d["beta1d"], hyperperams_d["beta2d"]))
 scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.01)
 
 scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.01)
@@ -60,9 +59,7 @@ def sample_runs(n_row, z_dim):
     gen_input = decoder(z).cpu()
     gen_data = gen_input.data.numpy()
 
-    gen_df = pd.DataFrame(gen_data, columns=main.X_train.columns)
-    filename = "5.csv"
-    gen_df.to_csv(filename, index=False)
+    np.savetxt('1.txt', gen_data)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
@@ -78,7 +75,7 @@ for epoch in range(100):
         fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
 
         optimizer_G.zero_grad()
-        mu, logvar, encoded = encoder_generator(real)
+        encoded = encoder_generator(real)
         labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
         dec_input = torch.cat([encoded, labels_tensor], dim=1)
         decoded = decoder(dec_input)
@@ -133,9 +130,9 @@ n_splits = 5
 kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-for fold, (_, val_index) in enumerate(kf.split(df_test)):
+for fold, (_, val_index) in enumerate(kf.split(df_train)):
     print(f"Fold {fold + 1}/{n_splits}")
-    df_val = df_test[val_index]
+    df_val = df_train[val_index]
     fold_recon_loss = []
     fold_adversarial_loss = []
     encoder_generator.eval()
@@ -148,7 +145,7 @@ for fold, (_, val_index) in enumerate(kf.split(df_test)):
         with torch.no_grad():
             val_tensor = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
             val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
-            val_mu, val_logvar, val_encoded = encoder_generator(val_real)
+            val_encoded = encoder_generator(val_real)
             labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
             dec_input = torch.cat([val_encoded, labels_tensor], dim=1)
             val_decoded = decoder(dec_input)
