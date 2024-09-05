@@ -1,15 +1,13 @@
 import numpy as np
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import KFold, GridSearchCV, train_test_split
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report
-from imblearn.over_sampling import SMOTE, ADASYN
+from imblearn.over_sampling import SMOTE
+from sklearn.neighbors import KNeighborsClassifier
+
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+
+from sklearn.metrics import classification_report, roc_curve, auc
+from sklearn.preprocessing import label_binarize
+
 from AAE import main
-
-
-# [I 2024-08-13 01:27:39,309] Trial 33 finished with value: 0.9802483588820078 and parameters: {'classifier': 'gb', 'gb_n_estimators': 200, 'gb_learning_rate': 0.049662646712519194, 'gb_max_depth': 9}. Best is trial 33 with value: 0.9802483588820078.
 
 X_train = main.X_train_rs
 y_train = main.y_train
@@ -17,27 +15,20 @@ X_test = main.X_test_rs
 y_test = main.y_test
 
 X_train, y_train = SMOTE().fit_resample(X_train, y_train)
-
-
-clf = GradientBoostingClassifier(
-    max_depth=9,
-    n_estimators=200,
-    learning_rate=.049662646712519194,
-    # subsample=1.0,
-    # criterion='friedman_mse',
-    # min_samples_split=2,
-    # min_samples_leaf=1,
-    # min_weight_fraction_leaf=0.0,
-    # min_impurity_decrease=0.0,
-    # init=None,
-    # random_state=None,
-    # max_features=None,
-    # verbose=0,
-    # max_leaf_nodes=None,
-    # warm_start=False
-
-)
+clf = KNeighborsClassifier(10, leaf_size=36, p=1, metric="minkowski")
 clf.fit(X_train, y_train)
-pred = clf.predict(X_test)
-class_report = classification_report(y_test, pred)
-print(class_report)
+y_pred = clf.predict(X_train)
+report = classification_report(y_train, y_pred)
+print(report)
+y_train_binarized = label_binarize(y_train, classes=np.arange(14))
+preds_binarized = label_binarize(y_pred, classes=np.arange(14))
+fpr = {}
+tpr = {}
+roc_auc = {}
+for i in range(14):
+    fpr[i], tpr[i], _ = roc_curve(y_train_binarized[:, i], preds_binarized[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+average_roc_auc = np.mean(list(roc_auc.values()))
+print(f"Average ROC AUC: {average_roc_auc}")
+
+# [I 2024-09-05 02:39:46,705] Trial 11 finished with value: 0.9671570154871914 and parameters: {'n_neighbors': 1, 'metric': 'minkowski', 'p': 1, 'leaf_size': 20}. Best is trial 11 with value: 0.9671570154871914.
