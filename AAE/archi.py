@@ -5,8 +5,8 @@ from AAE import main
 
 in_out = 105
 z_dim = 32
-hl_dim = (100, 100, 100)
-hl_dimd = (32, 32, 32, 32, 32)
+hl_dim = (100, 200, 300, 300, 200, 100)
+hl_dimd = (32, 64, 128, 256, 512, 256, 128, 64, 32)
 cuda = True if torch.cuda.is_available() else False
 encoded_tensor = torch.tensor(main.y.values, dtype=torch.float32).cuda() if cuda else torch.tensor(main.y.values, dtype=torch.float32)
 label_dim = encoded_tensor.shape[1]
@@ -73,16 +73,24 @@ class Discriminator(Module):
         super(Discriminator, self).__init__()
         dim = z_dim
         seq = []
-        for i in list(hl_dimd):
-            seq += [
-                Linear(z_dim, i),
-                LeakyReLU(0.2, inplace=True),
-                Linear(32, 32),
-                LeakyReLU(0.2, inplace=True),
-            ]
-            dim = i
+        for i in list(hl_dim):
+            seq += [hl_loop(dim, i)]
+            dim += i
+        # for i in list(hl_dim):
+            # seq += [
+            #     Linear(z_dim, i),
+            #     LeakyReLU(0.2, inplace=True),
+            #     # Linear(32, i),
+            #     # LeakyReLU(0.2, inplace=True),
+            # ]
+            # dim = i
         seq += [Linear(dim, 1), Sigmoid()]
         self.seq = Sequential(*seq)
     def forward(self, x):
         return self.seq(x)
 
+encoder_generator = EncoderGenerator().cuda() if cuda else EncoderGenerator()
+decoder = Decoder().cuda() if cuda else Decoder()
+discriminator = Discriminator().cuda() if cuda else Discriminator()
+
+# {'lr': 0.00016884384789265117, 'beta1': 0.8655422367267052, 'beta2': 0.9091518354520545, 'lrd': 1.753093187018987e-05, 'beta1d': 0.7845178698842424, 'beta2d': 0.9528948326902217}. 
