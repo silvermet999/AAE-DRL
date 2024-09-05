@@ -32,14 +32,14 @@ adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
 recon_loss = L1Loss().cuda() if cuda else L1Loss()
 
 
-encoder_generator = AAE_archi.EncoderGenerator().cuda() if cuda else AAE_archi.EncoderGenerator()
-decoder = AAE_archi.Decoder().cuda() if cuda else AAE_archi.Decoder()
-discriminator = AAE_archi.Discriminator().cuda() if cuda else AAE_archi.Discriminator()
+encoder_generator = AAE_archi.encoder_generator
+decoder = AAE_archi.decoder
+discriminator = AAE_archi.discriminator
 
 
 
 hyperparams_g = {'lr': 0.001, 'beta1': 0.5, 'beta2': 0.999}
-hyperperams_d={'lrd':0.0001, 'beta1d': 0.9, 'beta2d': 0.98}
+hyperperams_d={'lrd':0.0005, 'beta1d': 0.5, 'beta2d': 0.99} # stuck in local min
 
 
 optimizer_G = torch.optim.Adam(
@@ -59,7 +59,7 @@ def sample_runs(n_row, z_dim):
     gen_input = decoder(z).cpu()
     gen_data = gen_input.data.numpy()
 
-    np.savetxt('1.txt', gen_data)
+    np.savetxt('6.txt', gen_data)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
