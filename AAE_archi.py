@@ -3,11 +3,11 @@ from torch import exp, normal
 from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout
 from data import main
 
-in_out = 102
+in_out = 111
 z_dim = 128
-hl_dim = (100, 150, 100)
-hl_dime = (100, 150, 150, 100)
-hl_dimd = (32, 32, 32, 12, 12)
+hl_dim = (100, 150, 150, 150, 150)
+hl_dime = (150, 150, 150, 100, 50)
+hl_dimd = (64, 64, 32, 32, 12, 6)
 cuda = True if torch.cuda.is_available() else False
 encoded_tensor = torch.tensor(main.y_train, dtype=torch.float32).cuda() if cuda else torch.tensor(main.y_train, dtype=torch.float32)
 label_dim = encoded_tensor.shape[1]
@@ -15,7 +15,8 @@ label_dim = encoded_tensor.shape[1]
 
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    sampled_z = normal(0, 1, (mu.size(0), z_dim)).cuda() if cuda else normal(0, 1, (mu.size(0), z_dim))
+    # sampled_z = normal(0, 1, (mu.size(0), z_dim)).cuda() if cuda else normal(0, 1, (mu.size(0), z_dim))
+    sampled_z = torch.distributions.Exponential(0.1).sample((mu.size(0), z_dim)).cuda() if cuda else torch.distributions.Exponential(0.1).sample((mu.size(0), z_dim))
     z = sampled_z * std + mu
     return z
 
@@ -25,11 +26,14 @@ class hl_loop(Module):
         self.fc1 = Linear(i, o)
         self.leakyrelu1 = LeakyReLU(0.2)
         self.bn = BatchNorm1d(o)
+        self._is_discriminator = _is_discriminator
+        self.dr = Dropout(0.1) if self._is_discriminator else None
     def forward(self, l0):
         l1 = self.fc1(l0)
         l2 = self.leakyrelu1(l1)
         l3 = self.bn(l2)
-        return torch.cat([l3, l0], dim=1)
+        l4 = self.dr(l3) if self.dr is not None else l3
+        return torch.cat([l4, l0], dim=1)
 
 
 
@@ -83,7 +87,7 @@ class Discriminator(Module):
                 hl_loop(dim, i)]
             dim += i
         seq += [
-            Dropout(0.1),
+            # Dropout(0.2),
             Linear(dim, 1), Sigmoid()]
         self.seq = Sequential(*seq)
     def forward(self, x):
