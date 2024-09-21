@@ -1,5 +1,7 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
+
+from sklearn.model_selection import KFold
 from torch.optim.lr_scheduler import MultiStepLR
 
 from AAE import AAE_archi
@@ -7,6 +9,7 @@ from AAE import AAE_archi
 import numpy as np
 import torch
 from torch.nn import BCELoss, L1Loss
+from torch.distributions import Distribution
 from torch import cuda
 from data import main
 import itertools
@@ -38,14 +41,26 @@ decoder = AAE_archi.decoder
 discriminator = AAE_archi.discriminator
 
 
+def CustomDistribution(a):
+    exponpow_dist = torch.pow(a, 0.1)
+    exp_dist = torch.exp(a)
+    log_normal_dist = torch.lognorm(a)
+    cauchy_dist = torch.Cauchy(0, 1)
+    gamma_dist = torch.Gamma(1, 1)
+    norm_dist = torch.normal(0, 1, (a))
+    chi_dist = torch.Chi2(1)
+    rayleigh_dist = torch.Rayleigh(9)
+
+
+
 
 def l1_regularization(model):
     l1_norm = sum(p.abs().sum() for p in model.parameters())
     return 0.00001 * l1_norm
 
 
-hyperparams_g = {'lr': 0.0001, 'beta1': 0.86, 'beta2': 0.909}
-hyperparams_d = {'lr': 0.0003, 'beta1': 0.78, 'beta2': 0.952}
+hyperparams_g = {'lr': 0.001, 'beta1': 0.86, 'beta2': 0.909}
+hyperparams_d = {'lr': 0.0001, 'beta1': 0.78, 'beta2': 0.952}
 
 
 optimizer_G = torch.optim.Adam(
@@ -53,7 +68,7 @@ optimizer_G = torch.optim.Adam(
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=hyperparams_d["lr"], betas=(hyperparams_d["beta1"], hyperparams_d["beta2"]))
 # scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.01)
 
-scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.01)
+# scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.01)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
@@ -61,22 +76,22 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
 def sample_runs(n_row, z_dim):
-    z = torch.normal(0, 1, (n_row ** 2, z_dim)).cuda() if cuda else torch.normal(0, 1, (n_row ** 2, z_dim))
+    # z = torch.normal(0, 1, (n_row ** 2, z_dim)).cuda() if cuda else torch.normal(0, 1, (n_row ** 2, z_dim))
+    z = torch.distributions.Exponential(0.1).sample((n_row ** 2, z_dim)).cuda() if cuda else torch.distributions.Exponential(0.1).sample((n_row ** 2, z_dim))
     gen_input = decoder(z).cpu()
     gen_data = gen_input.data.numpy()
 
-    np.savetxt('3.txt', gen_data)
+    np.savetxt('1.txt', gen_data)
 
 
 """--------------------------------------------------model training--------------------------------------------------"""
-for epoch in range(200):
-    n_batch = len(df_train) // 64
+for epoch in range(50):
+    n_batch = len(df_train) // 32
     for i in range(n_batch):
-        str_idx = i * 64
-        end_idx = str_idx+64
+        str_idx = i * 32
+        end_idx = str_idx+32
         train_data_tensor = torch.tensor(df_train[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(df_train[str_idx:end_idx], dtype=torch.float)
-
-        real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
+        real = train_data_tensor
         valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
         fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
 
@@ -92,11 +107,9 @@ for epoch in range(200):
         optimizer_G.step()
 
         optimizer_D.zero_grad()
-
-        # log_normal = torch.distributions.LogNormal(loc=0, scale=1)
-        # z = log_normal.sample((batch_data.shape[0], AAE_archi.z_dim)).cuda() if cuda else log_normal.sample((batch_data.shape[0], AAE_archi.z_dim))
+        real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
         z = torch.normal(0, 1, (train_data_tensor.shape[0], AAE_archi.z_dim)).cuda() if cuda else torch.normal(0, 1, (train_data_tensor.shape[0], AAE_archi.z_dim))
-
+        # z = torch.distributions.Exponential(0.1).sample((train_data_tensor.shape[0], AAE_archi.z_dim)).cuda() if cuda else torch.distributions.Exponential(0.1).sample((train_data_tensor.shape[0], AAE_archi.z_dim))
         # real and fake loss should be close
         # discriminator(z) should be close to 0e
         real_loss = adversarial_loss(discriminator(z), valid)
@@ -107,13 +120,13 @@ for epoch in range(200):
         d_loss.backward()
         optimizer_D.step()
 
-    scheduler_G.step()
+    # scheduler_G.step()
     # scheduler_D.step()
     print(epoch, d_loss.item(), g_loss.item())
 
     batches_done = epoch * len(df_train)
-    if batches_done % 400 == 0:
-        sample_runs(n_row=315, z_dim=142)
+    if batches_done:
+        sample_runs(n_row=315, z_dim=140)
 
     """-------------------------------------------------save model---------------------------------------------------"""
 #     if (epoch + 1) % 20 == 0:
@@ -132,69 +145,44 @@ for epoch in range(200):
 
 
 """--------------------------------------------------model testing---------------------------------------------------"""
-# n_splits = 5
-# kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-# recon_losses = []
-# adversarial_losses = []
-# for fold, (_, val_index) in enumerate(kf.split(df_train)):
-#     print(f"Fold {fold + 1}/{n_splits}")
-#     df_val = df_train[val_index]
-#     fold_recon_loss = []
-#     fold_adversarial_loss = []
-#     encoder_generator.eval()
-#     decoder.eval()
-#     discriminator.eval()
-#     n_batch = len(df_val)
-#     for i in range(n_batch):
-#         str_idx = i * 1
-#         end_idx = str_idx + 1
-#         with torch.no_grad():
-#             val_tensor = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
-#             val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
-#             val_encoded = encoder_generator(val_real)
-#             labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
-#             dec_input = torch.cat([val_encoded, labels_tensor], dim=1)
-#             val_decoded = decoder(dec_input)
-#         recon_loss_val = recon_loss(val_decoded, val_real)
-#         valid_val = torch.ones((val_real.shape[0], 1)).cuda() if cuda else torch.ones((val_real.shape[0], 1))
-#         adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
-#         fold_recon_loss.append(recon_loss_val.item())
-#         fold_adversarial_loss.append(adv_loss_val.item())
-#     recon_losses.append(np.mean(fold_recon_loss))
-#     adversarial_losses.append(np.mean(fold_adversarial_loss))
-# avg_recon_loss = np.mean(recon_losses)
-# avg_adversarial_loss = np.mean(adversarial_losses)
-# std_recon_loss = np.std(recon_losses)
-# std_adversarial_loss = np.std(adversarial_losses)
-
+n_splits = 5
+kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-encoder_generator.eval()
-decoder.eval()
-discriminator.eval()
-n_batch = len(df_train)
-for i in range(n_batch):
-    str_idx = i * 1
-    end_idx = str_idx + 1
-    with torch.no_grad():
-        val_tensor = torch.tensor(df_train[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(
-            df_train[str_idx:end_idx], dtype=torch.float)
-        val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
-        val_encoded = encoder_generator(val_real)
-        labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
-        dec_input = torch.cat([val_encoded, labels_tensor], dim=1)
-        val_decoded = decoder(dec_input)
-    recon_loss_val = recon_loss(val_decoded, val_real)
-    valid_val = torch.ones((val_real.shape[0], 1)).cuda() if cuda else torch.ones((val_real.shape[0], 1))
-    adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
-    recon_losses.append(np.mean(recon_loss_val.item()))
-    adversarial_losses.append(np.mean(adv_loss_val.item()))
+for fold, (_, val_index) in enumerate(kf.split(df_train)):
+    print(f"Fold {fold + 1}/{n_splits}")
+    df_val = df_train[val_index]
+    fold_recon_loss = []
+    fold_adversarial_loss = []
+    encoder_generator.eval()
+    decoder.eval()
+    discriminator.eval()
+    n_batch = len(df_val)
+    for i in range(n_batch):
+        str_idx = i * 1
+        end_idx = str_idx + 1
+        with torch.no_grad():
+            val_tensor = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
+            val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
+            val_encoded = encoder_generator(val_real)
+            labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
+            dec_input = torch.cat([val_encoded, labels_tensor], dim=1)
+            val_decoded = decoder(dec_input)
+        recon_loss_val = recon_loss(val_decoded, val_real)
+        valid_val = torch.ones((val_real.shape[0], 1)).cuda() if cuda else torch.ones((val_real.shape[0], 1))
+        adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
+        fold_recon_loss.append(recon_loss_val.item())
+        fold_adversarial_loss.append(adv_loss_val.item())
+    recon_losses.append(np.mean(fold_recon_loss))
+    adversarial_losses.append(np.mean(fold_adversarial_loss))
 avg_recon_loss = np.mean(recon_losses)
 avg_adversarial_loss = np.mean(adversarial_losses)
 std_recon_loss = np.std(recon_losses)
 std_adversarial_loss = np.std(adversarial_losses)
-print(f"Average Reconstruction Loss: {avg_recon_loss:.4f} ± {std_recon_loss:.4f}")
-print(f"Average Adversarial Loss: {avg_adversarial_loss:.4f} ± {std_adversarial_loss:.4f}")
+print(avg_recon_loss, std_recon_loss)
+print(avg_adversarial_loss, std_adversarial_loss)
+
+
 
 
 """--------------------------------------------------mlflow---------------------------------------------------"""
