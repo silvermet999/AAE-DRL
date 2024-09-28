@@ -1,22 +1,114 @@
+import math
+
 import torch
+from scipy.stats import lognorm, cauchy, norm, expon, gamma, uniform, chi2, exponpow
 from torch import exp, normal
-from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout
+from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Parameter, Softmax
 from data import main
 
 in_out = 111
 z_dim = 128
 hl_dim = (100, 150, 150, 150, 150)
-hl_dime = (150, 150, 150, 100, 50)
-hl_dimd = (64, 64, 32, 32, 12, 6)
+hl_dime = (150, 200, 150, 100)
+hl_dimd = (32, 32, 12, 6)
 cuda = True if torch.cuda.is_available() else False
-encoded_tensor = torch.tensor(main.y_train, dtype=torch.float32).cuda() if cuda else torch.tensor(main.y_train, dtype=torch.float32)
+encoded_tensor = torch.tensor(main.y_train.values, dtype=torch.float32).cuda() if cuda else torch.tensor(main.y_train.values, dtype=torch.float32)
 label_dim = encoded_tensor.shape[1]
+
+def custom_dist(size):
+    for i, _ in enumerate(main.X.columns):
+        if i in [0, 6, 7, 10, 11, 101, 102, 103, 104, 106]:
+            z = lognorm(0.5, -850, 2500).rvs(size)
+        elif i in [1, 2, 53, 54, 55, 86, 97, 98, 99, 109]:
+            z = cauchy(100, 10).rvs(size)
+        elif i in [3, 9, 107]:
+            z = norm(5447, 153).rvs(size)
+        elif i in [4, 5, 13, 25, 34, 47, 49, 50, 51, 52, 60, 66, 69, 70]:
+            z = expon(0, 8).rvs(size)
+        elif i in [8, 95, 105]:
+            z = chi2(1, 0, 13).rvs(size)
+        elif i in [32, 58, 71]:
+            z = gamma(1, 0, 20).rvs(size)
+        elif i in [108, 111]:
+            z = uniform(1, 29640).rvs(size)
+        else:
+            z = exponpow(0.1, 0, 0.95).rvs(size)
+
+        z = torch.tensor(z, dtype=torch.float32).cuda() if cuda else torch.tensor(z, dtype=torch.float32)
+
+    return z
+
+
+class Self_Attn(Module):
+    """ Self attention Layer"""
+    def __init__(self, in_dim, activation):
+        """
+        initialize self-attention layer
+        initializes key, query and value layers, gamma coefficient and softmax layer
+
+        Parameters
+        ----------
+        in_dim : int
+            channel number of input
+        activation : str
+            activation type (e.g. 'relu')
+        """
+        super(Self_Attn, self).__init__()
+        self.activation = activation
+        self.query_conv = Linear(in_dim, (in_dim // 8)) # 50, 32, 256 => 50, 32, 32
+        self.key_conv = Linear(in_dim, (in_dim // 8)) # 50, 32, 32
+        self.value_conv = Linear(in_dim, in_dim) # # 50, 32, 256
+        self.gamma = Parameter(torch.zeros(1))
+
+        self.softmax = Softmax(dim=-1)
+
+    def forward(self, x):
+        """
+        calculate key, query and value for each couple in input (number of couples N x N)
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            input feature maps (shape: B X C X W X H)
+
+        Returns
+        -------
+        out : torch.Tensor
+            self attention value + input feature (shape: B X C X W X H)
+        attention: torch.Tensor
+            attention coefficients (shape: B X N X N) (N is W * H)
+        """
+        # batch, C, width, height = x.size()
+        # proj_query = self.query_conv(x).view(batch, -1, width * height).permute(0, 2, 1)  # shape: B x N x (C // 8)
+        print("x", x.shape)
+        proj_query = self.query_conv(x)
+        print("query", proj_query.shape)
+        # proj_key = self.key_conv(x).view(batch, -1, width * height)  # shape: B x (C // 8) x N
+        proj_key = self.key_conv(x)
+        print("key", proj_key.shape)
+        energy = torch.bmm(proj_query, proj_key)  # shape: B x N x N
+        print("energy", energy.shape)
+        attention = self.softmax(energy)  # shape: B x N x N
+        print("att", attention.shape)
+        # proj_value = self.value_conv(x).view(batch, -1, width * height)  # shape: B X C X N
+        proj_value = self.value_conv(x)  # shape: B X C X N
+        print("value", proj_value.shape)
+
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))  # shape: B x C x N
+        # out = out.view(batch, C, width, height)  # shape: B x C x W x H
+
+        # calculate attention + input
+        out = self.gamma * out + x  # shape: B x C x W x H
+        return out, attention
+
+
+
 
 
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    # sampled_z = normal(0, 1, (mu.size(0), z_dim)).cuda() if cuda else normal(0, 1, (mu.size(0), z_dim))
-    sampled_z = torch.distributions.Exponential(0.1).sample((mu.size(0), z_dim)).cuda() if cuda else torch.distributions.Exponential(0.1).sample((mu.size(0), z_dim))
+    sampled_z = normal(0, 1, (mu.size(0), z_dim)).cuda() if cuda else normal(0, 1, (mu.size(0), z_dim))
+    # sampled_z = exppower(loc=torch.tensor(0.), scale=torch.tensor(1.), b=0.1, size=(mu.size(0), z_dim)).cuda() if cuda else exppower(loc=torch.tensor(0.), scale=torch.tensor(1.), b=0.1, size=(mu.size(0), z_dim))
     z = sampled_z * std + mu
     return z
 
@@ -84,7 +176,7 @@ class Discriminator(Module):
         seq = []
         for i in list(hl_dim):
             seq += [
-                hl_loop(dim, i)]
+                hl_loop(dim, i, _is_discriminator=True)]
             dim += i
         seq += [
             # Dropout(0.2),
