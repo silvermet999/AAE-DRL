@@ -14,23 +14,97 @@ import numpy as np
 cuda = True if torch.cuda.is_available() else False
 
 
+class Encoder(nn.Module):
+    def __init__(self, trial, in_features_e):
+        super(Encoder, self).__init__()
+        layers_e = []
+        n_layers_e = trial.suggest_int("n_layers_e", 5, 20)
+        z_dim = 40
 
-def define_model():
-    encoder = AAE_archi.encoder_generator
-    decoder = AAE_archi.decoder
-    discriminator = AAE_archi.discriminator
+        for i in range(n_layers_e):
+            out_features = trial.suggest_int(f"n_units_e_l{i}", 5, 50)
+            layers_e.append(nn.Linear(in_features_e, out_features))
+            layers_e.append(nn.LeakyReLU())
+            layers_e.append(nn.BatchNorm1d(out_features))
+            p_e = trial.suggest_float(f"dropout_l{i}", 0, 0.3)
+            layers_e.append(nn.Dropout(p_e))
+            in_features_e = out_features
 
-    return encoder, decoder, discriminator
+        self.encoder_layers = nn.Sequential(*layers_e)
+        self.mu_layer = nn.Linear(in_features_e, z_dim)
+        self.logvar_layer = nn.Linear(in_features_e, z_dim)
+
+    def forward(self, x):
+        x = self.encoder_layers(x)
+        mu = self.mu_layer(x)
+        logvar = self.logvar_layer(x)
+        z = reparameterization(mu, logvar, 40)
+        return z
+
+def reparameterization(mu, logvar, z_dim):
+    std = torch.exp(logvar / 2)
+    device = mu.device
+    sampled_z = torch.normal(0, 1, (mu.size(0), z_dim)).to(device)
+    z = mu + std * sampled_z
+    return z
 
 
+class Decoder(nn.Module):
+    def __init__(self, trial, in_features_de):
+        super(Decoder, self).__init__()
+        layers_de = []
+        n_layers_de = trial.suggest_int("n_layers_de", 5, 20)
+
+        for i in range(n_layers_de):
+            out_features = trial.suggest_int(f"n_units_de_l{i}", 5, 50)
+            layers_de.append(nn.Linear(in_features_de, out_features))
+            layers_de.append(nn.LeakyReLU())
+            layers_de.append(nn.BatchNorm1d(out_features))
+            p = trial.suggest_float(f"dropout_l{i}", 0, 0.5)
+            layers_de.append(nn.Dropout(p))
+            in_features_de = out_features
+
+        layers_de.append(nn.Linear(in_features_de, 46))
+        layers_de.append(nn.Tanh())
+
+        self.decoder = nn.Sequential(*layers_de)
+
+    def forward(self, x):
+        return self.decoder(x)
+
+class Discriminator(nn.Module):
+    def __init__(self, trial, in_features_d):
+        super(Discriminator, self).__init__()
+        layers_d = []
+        n_layers_d = trial.suggest_int("n_layers_de", 5, 20)
+
+        for i in range(n_layers_d):
+            out_features = trial.suggest_int(f"n_units_de_l{i}", 5, 50)
+            layers_d.append(nn.Linear(in_features_d, out_features))
+            layers_d.append(nn.LeakyReLU())
+            layers_d.append(nn.BatchNorm1d(out_features))
+            p = trial.suggest_float(f"dropout_l{i}", 0, 0.5)
+            layers_d.append(nn.Dropout(p))
+            in_features_d = out_features
+        layers_d.append(nn.Linear(in_features_d, 1))
+        layers_d.append(nn.Sigmoid())
+        self.decoder = nn.Sequential(*layers_d)
+
+    def forward(self, x):
+        return self.decoder(x)
 
 
 
 def objective(trial):
-    enc, dec, disc = define_model()
-    adversarial_loss = nn.BCELoss().cuda()
-    recon_loss = nn.L1Loss().cuda()
-    #
+    in_features_e = 46
+    in_features_de = 40 + 12
+    in_features_d = 40
+
+    enc = Encoder(trial, in_features_e).cuda() if cuda else Encoder(trial, in_features_e)
+    dec = Decoder(trial, in_features_de).cuda() if cuda else Decoder(trial, in_features_de)
+    disc = Discriminator(trial, in_features_d).cuda() if cuda else Discriminator(trial, in_features_d)
+    adversarial_loss = nn.BCELoss().cuda() if cuda else nn.BCELoss()
+    recon_loss = nn.L1Loss().cuda() if cuda else nn.L1Loss()
     lr = trial.suggest_float('lr', 1e-5, 0.01, log=True)
     beta1 = trial.suggest_float('beta1', 0.5, 0.9)
     beta2 = trial.suggest_float('beta2', 0.9, 0.999)
@@ -40,27 +114,30 @@ def objective(trial):
     optimizer_G = torch.optim.Adam(itertools.chain(enc.parameters(), dec.parameters()), lr=lr, betas=(beta1, beta2))
     optimizer_D = torch.optim.Adam(disc.parameters(), lr=lrd, betas=(beta1d, beta2d))
 
-    train = main.X_train_rs
     recon_losses = []
     adversarial_losses = []
 
     epochs = trial.suggest_int("epochs", 100, 300)
     batches = trial.suggest_int("batches", 32, 128)
+    encoded_tensor = torch.tensor(main.y_train.values, dtype=torch.float32).cuda() if cuda else torch.tensor(
+        main.y_train.values, dtype=torch.float32)
+    df_train = main.X_train_rs
     for epoch in range(epochs):
-        n_batch = len(train) // batches
+        n_batch = len(df_train) // batches
         for i in range(n_batch):
             str_idx = i * batches
             end_idx = str_idx + batches
-            batch_data = train[str_idx:end_idx]
-
-            train_data_tensor = torch.tensor(batch_data, dtype=torch.float).cuda() if cuda else torch.tensor(batch_data, dtype=torch.float)
+            train_data_tensor = torch.tensor(df_train[str_idx:end_idx], dtype=torch.float).cuda() if cuda \
+                else torch.tensor(df_train[str_idx:end_idx], dtype=torch.float)
             real = (train_data_tensor - train_data_tensor.mean()) / train_data_tensor.std()
-            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones((train_data_tensor.shape[0], 1))
-            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros((train_data_tensor.shape[0], 1))
+            valid = torch.ones((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.ones(
+                (train_data_tensor.shape[0], 1))
+            fake = torch.zeros((train_data_tensor.shape[0], 1)).cuda() if cuda else torch.zeros(
+                (train_data_tensor.shape[0], 1))
 
             optimizer_G.zero_grad()
             encoded = enc(real)
-            labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
+            labels_tensor = encoded_tensor[str_idx:end_idx]
             dec_input = torch.cat([encoded, labels_tensor], dim=1)
             decoded = dec(dec_input)
             g_loss = 0.001 * adversarial_loss(disc(encoded), valid)+0.999 * recon_loss(decoded, real)
@@ -70,10 +147,7 @@ def objective(trial):
 
             optimizer_D.zero_grad()
 
-            z = torch.normal(0, 1, (batch_data.shape[0], 32)).cuda() if cuda else torch.normal(0, 1, (batch_data.shape[0], 32))
-
-            # real and fake loss should be close
-            # discriminator(z) should be close to 0
+            z = torch.normal(0, 1, (train_data_tensor.shape[0], in_features_d)).cuda() if cuda else torch.normal(0, 1, (train_data_tensor.shape[0], in_features_d))
             real_loss = adversarial_loss(disc(z), valid)
             fake_loss = adversarial_loss(disc(encoded.detach()), fake)
             d_loss = 0.5 * (real_loss + fake_loss)
@@ -84,13 +158,13 @@ def objective(trial):
     enc.eval()
     dec.eval()
     disc.eval()
-    n_batch = len(train)
+    n_batch = len(df_train)
     for i in range(n_batch):
         str_idx = i * 1
         end_idx = str_idx + 1
         with torch.no_grad():
-            val_tensor = torch.tensor(train[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(
-                train[str_idx:end_idx], dtype=torch.float)
+            val_tensor = torch.tensor(df_train[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(
+                df_train[str_idx:end_idx], dtype=torch.float)
             val_real = (val_tensor - val_tensor.mean()) / val_tensor.std()
             val_encoded = enc(val_real)
             labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
