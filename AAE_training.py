@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch.nn import BCELoss, L1Loss
 from torch import cuda
+from torch.utils.data import DataLoader, Dataset
 from data import main
 import itertools
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -19,8 +20,28 @@ cuda = True if cuda.is_available() else False
 torch.cuda.empty_cache()
 
 
-df_train = main.X_train_rs
 
+class CustomDataset(Dataset):
+    def __init__(self, data, labels):
+        self.data = data
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+        label = self.labels[idx]
+        return sample, label
+
+X_train = main.X_train_rs[:59280]
+y_train = main.y_train_np[:59280]
+X_val = main.X_train_rs[-14820:]
+y_val = main.y_train_np[-14820:]
+dataset = CustomDataset(X_train, y_train)
+dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
+val = CustomDataset(X_val, y_val)
+val_dl = DataLoader(dataset, batch_size=1)
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
@@ -37,16 +58,16 @@ def l1_regularization(model, rate):
     return rate * l1_norm
 
 
-hyperparams_g = {'lr': 0.003, 'beta1': 0.86, 'beta2': 0.909}
-hyperparams_d = {'lr': 0.0001, 'beta1': 0.78, 'beta2': 0.952}
+hyperparams_g = {'lr': 0.0005, 'beta1': 0.9, 'beta2': 0.9}
+hyperparams_d = {'lr': 0.0001, 'beta1': 0.9, 'beta2': 0.95}
 
 
 optimizer_G = torch.optim.Adam(
     itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=hyperparams_g["lr"], betas=(hyperparams_g["beta1"], hyperparams_g["beta2"]))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=hyperparams_d["lr"], betas=(hyperparams_d["beta1"], hyperparams_d["beta2"]))
-# scheduler_D = MultiStepLR(optimizer_D, milestones=[30, 80], gamma=0.01)
+scheduler_D = MultiStepLR(optimizer_D, milestones=[20, 80], gamma=0.01)
 
-# scheduler_G = MultiStepLR(optimizer_G, milestones=[30, 80], gamma=0.01)
+scheduler_G = MultiStepLR(optimizer_G, milestones=[20, 80], gamma=0.01)
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
@@ -68,9 +89,9 @@ def sample_runs():
     # np.savetxt('4.txt', gen_data)
     with torch.no_grad():
         n_interpolations = 4
-        n_samples_per_interpolation = 6046
-        z1 = torch.randn(n_interpolations, 112).cuda() if cuda else torch.randn(n_interpolations, 112)
-        z2 = torch.randn(n_interpolations, 112).cuda() if cuda else torch.randn(n_interpolations, 112)
+        n_samples_per_interpolation = 18525
+        z1 = torch.randn(n_interpolations, 111).cuda() if cuda else torch.randn(n_interpolations, 111)
+        z2 = torch.randn(n_interpolations, 111).cuda() if cuda else torch.randn(n_interpolations, 111)
 
         samples = []
         for i in range(n_interpolations):
@@ -84,32 +105,29 @@ def sample_runs():
 
 """--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(200):
-    n_batch = len(df_train) // 64
-    for i in range(n_batch):
-        str_idx = i * 64
-        end_idx = str_idx+ 64
-        real = torch.tensor(df_train[str_idx:end_idx], dtype=torch.float).cuda() if cuda \
-            else torch.tensor(df_train[str_idx:end_idx], dtype=torch.float)
+    for i, (X, y) in enumerate(dataloader):
+        valid = torch.ones((X.shape[0], 1), requires_grad=False).cuda() if cuda else torch.ones((X.shape[0], 1),
+                                                                                                   requires_grad=False)
+        fake = torch.zeros((X.shape[0], 1), requires_grad=False).cuda() if cuda else torch.zeros((X.shape[0], 1),
+                                                                                                    requires_grad=False)
+        real = X.type(Tensor).cuda() if cuda else X.type(Tensor)
+        y = y.type(Tensor).cuda() if cuda else y.type(Tensor)
         real = (real - real.mean()) / real.std()
-        valid = torch.ones((real.shape[0], 1)).cuda() if cuda else torch.ones((real.shape[0], 1))
-        fake = torch.zeros((real.shape[0], 1)).cuda() if cuda else torch.zeros((real.shape[0], 1))
         noisy_real = real + torch.randn_like(real) * 0.1
 
         optimizer_G.zero_grad()
-        # encoded = encoder_generator(real)
         encoded = encoder_generator(noisy_real)
-        labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
-        dec_input = torch.cat([encoded, labels_tensor], dim=1)
+        dec_input = torch.cat([encoded, y], dim=1)
         decoded = decoder(dec_input)
         l1_pen_g = l1_regularization(decoder, 0.00001)
-        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(decoded, real) + l1_pen_g
+        g_loss = 0.001 * adversarial_loss(discriminator(encoded), valid) + 0.999 * recon_loss(decoded, noisy_real) + l1_pen_g
 
         g_loss.backward()
         optimizer_G.step()
 
         optimizer_D.zero_grad()
         # real = (real - real.mean()) / real.std()
-        # encoded = encoder_generator(real)
+        # encoded = encoder_generator(noisy_real)
         z = torch.normal(0, 1, (real.shape[0], AAE_archi.z_dim)).cuda() if cuda else torch.normal(0, 1, (real.shape[0], AAE_archi.z_dim))
         real_loss = adversarial_loss(discriminator(z), valid)
         fake_loss = adversarial_loss(discriminator(encoded.detach()), fake)
@@ -123,9 +141,8 @@ for epoch in range(200):
     # scheduler_D.step()
     print(epoch, d_loss.item(), g_loss.item())
 
+# samples = sample_runs(74100, 100)
 samples = sample_runs()
-samples = samples.detach().cpu().numpy()
-np.savetxt('5.txt', samples)
 print("sample saved")
 
 """--------------------------------------------------model testing---------------------------------------------------"""
@@ -133,9 +150,9 @@ n_splits = 5
 kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-for fold, (_, val_index) in enumerate(kf.split(df_train)):
+for fold, (_, val_index) in enumerate(kf.split(val_dl)):
     print(f"Fold {fold + 1}/{n_splits}")
-    df_val = df_train[val_index]
+    df_val = val_dl[val_index]
     fold_recon_loss = []
     fold_adversarial_loss = []
     encoder_generator.eval()
@@ -147,14 +164,14 @@ for fold, (_, val_index) in enumerate(kf.split(df_train)):
         end_idx = str_idx + 1
         with torch.no_grad():
             val_real = torch.tensor(df_val[str_idx:end_idx], dtype=torch.float).cuda() if cuda else torch.tensor(df_val[str_idx:end_idx], dtype=torch.float)
-            val_real = (val_real - val_real.mean()) / val_real.std()
+            # val_real = (val_real - val_real.mean()) / val_real.std()
             val_encoded = encoder_generator(val_real)
             labels_tensor = AAE_archi.encoded_tensor[str_idx:end_idx]
             dec_input = torch.cat([val_encoded, labels_tensor], dim=1)
             val_decoded = decoder(dec_input)
         recon_loss_val = recon_loss(val_decoded, val_real)
-        # val_real = (val_real - val_real.mean()) / val_real.std()
-        # val_encoded = encoder_generator(val_real)
+        val_real = (val_real - val_real.mean()) / val_real.std()
+        val_encoded = encoder_generator(val_real)
         valid_val = torch.ones((val_real.shape[0], 1)).cuda() if cuda else torch.ones((val_real.shape[0], 1))
         adv_loss_val = adversarial_loss(discriminator(val_encoded), valid_val)
         fold_recon_loss.append(recon_loss_val.item())
