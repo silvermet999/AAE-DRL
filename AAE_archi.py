@@ -4,6 +4,8 @@ import torch
 from scipy.stats import lognorm, cauchy, norm, expon, gamma, uniform, chi2, exponpow, rayleigh
 from torch import exp, normal
 from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Softmax, ReLU
+from torch.nn.utils import prune
+
 from data import main
 
 in_out = 111
@@ -73,6 +75,10 @@ class hl_loop(Module):
         self.bn = BatchNorm1d(o)
         self._is_discriminator = _is_discriminator
         self.dr = Dropout(0.1) if self._is_discriminator else None
+
+    def apply_pruning(self):
+        prune.l1_unstructured(self.fc1, name="weight", amount=0.1)
+
     def forward(self, l0):
         l1 = self.fc1(l0)
         l2 = self.leakyrelu1(l1)
@@ -80,8 +86,10 @@ class hl_loop(Module):
         l4 = self.dr(l3) if self.dr is not None else l3
         return torch.cat([l4, l0], dim=1)
 
-
-
+def apply_pruning_to_model(block):
+    for module in block.seq:
+        if isinstance(module, hl_loop):
+            module.apply_pruning()
 
 
 class EncoderGenerator(Module):
@@ -93,11 +101,11 @@ class EncoderGenerator(Module):
             seq += [hl_loop(dim, i)]
             dim += i
         seq += (
-            Linear(dim, 46),
+            Linear(dim, 99),
             LeakyReLU(0.2))
         self.seq = Sequential(*seq)
-        self.mu = Linear(46, z_dim)
-        self.logvar = Linear(46, z_dim)
+        self.mu = Linear(99, z_dim)
+        self.logvar = Linear(99, z_dim)
 
     def forward(self, x):
         x = self.seq(x)
@@ -105,6 +113,7 @@ class EncoderGenerator(Module):
         logvar = self.logvar(x)
         z = reparameterization(mu, logvar, z_dim)
         return z
+
 
 class Decoder(Module):
     def __init__(self):
@@ -145,6 +154,3 @@ class Discriminator(Module):
 encoder_generator = EncoderGenerator(in_out, ).cuda() if cuda else EncoderGenerator(in_out, )
 decoder = Decoder().cuda() if cuda else Decoder()
 discriminator = Discriminator().cuda() if cuda else Discriminator()
-
-# Average Reconstruction Loss: 0.3489 ± 0.0019
-# Average Adversarial Loss: 3.4759 ± 0.0219
