@@ -2,7 +2,9 @@
 import os
 
 from sklearn.model_selection import KFold
+from torch.nn.utils import prune
 from torch.optim.lr_scheduler import MultiStepLR
+
 
 from AAE import AAE_archi
 
@@ -10,7 +12,6 @@ import numpy as np
 import torch
 from torch.nn import BCELoss, L1Loss
 from torch import cuda
-from torch.utils.data import DataLoader, Dataset
 from data import main
 import itertools
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -21,27 +22,7 @@ torch.cuda.empty_cache()
 
 
 
-class CustomDataset(Dataset):
-    def __init__(self, data, labels):
-        self.data = data
-        self.labels = labels
 
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        sample = self.data[idx]
-        label = self.labels[idx]
-        return sample, label
-
-X_train = main.X_train_rs[:59280]
-y_train = main.y_train_np[:59280]
-X_val = main.X_train_rs[-14820:]
-y_val = main.y_train_np[-14820:]
-dataset = CustomDataset(X_train, y_train)
-dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=4)
-val = CustomDataset(X_val, y_val)
-val_dl = DataLoader(dataset, batch_size=1)
 
 """--------------------------------------------------loss and optim--------------------------------------------------"""
 adversarial_loss = BCELoss().cuda() if cuda else BCELoss()
@@ -57,9 +38,11 @@ def l1_regularization(model, rate):
     l1_norm = sum(p.abs().sum() for p in model.parameters())
     return rate * l1_norm
 
-
-hyperparams_g = {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.9}
-hyperparams_d = {'lr': 0.00002, 'beta1': 0.9, 'beta2': 0.95}
+#
+# hyperparams_g = {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.9}
+# hyperparams_d = {'lr': 0.00002, 'beta1': 0.9, 'beta2': 0.95}
+hyperparams_g = {'lr': 0.00005, 'beta1': 0.7, 'beta2': 0.96}
+hyperparams_d = {'lr': 0.002, 'beta1': 0.55, 'beta2': 0.94}
 
 
 optimizer_G = torch.optim.Adam(
@@ -69,25 +52,11 @@ scheduler_D = MultiStepLR(optimizer_D, milestones=[20, 80], gamma=0.01)
 
 scheduler_G = MultiStepLR(optimizer_G, milestones=[20, 80], gamma=0.01)
 
+
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-# class PruningScheduler:
-#     def __init__(self, model, pruning_steps, pruning_amount):
-#         self.model = model
-#         self.pruning_steps = pruning_steps
-#         self.pruning_amount = pruning_amount
-#         self.current_step = 0
-#
-#     def step(self):
-#         if self.current_step % self.pruning_steps == 0:
-#             print(f'Pruning at step {self.current_step}')
-#             prune.l1_unstructured(self.model.seq, name='weight', amount=self.pruning_amount)
-#         self.current_step += 1
-#
-# pruning_scheduler = PruningScheduler(encoder_generator, pruning_steps=100, pruning_amount=0.1)
-
 """-----------------------------------------------------data gen-----------------------------------------------------"""
-def interpolate(z1, z2, n_steps=10):
+def interpolate(z1, z2, n_steps=5):
     interpolations = []
     for alpha in torch.linspace(0, 1, n_steps):
         z = z1 * (1 - alpha) + z2 * alpha
@@ -96,15 +65,15 @@ def interpolate(z1, z2, n_steps=10):
 
 def sample_runs():
     # z = torch.normal(0, 1, (batches, z_dim)).cuda() if cuda else torch.normal(0, 1, (batches, z_dim))
-    # # z = AAE_archi.custom_dist((batches, z_dim)).cuda() if cuda else AAE_archi.custom_dist((batches, z_dim))
+    # # # z = AAE_archi.custom_dist((batches, z_dim)).cuda() if cuda else AAE_archi.custom_dist((batches, z_dim))
     # gen_input = decoder(z).cpu()
     # gen_data = gen_input.data.numpy()
     # np.savetxt('1.txt', gen_data)
     with torch.no_grad():
-        n_interpolations = 4
-        n_samples_per_interpolation = 18525
-        z1 = torch.randn(n_interpolations, 111).cuda() if cuda else torch.randn(n_interpolations, 111)
-        z2 = torch.randn(n_interpolations, 111).cuda() if cuda else torch.randn(n_interpolations, 111)
+        n_interpolations = 5
+        n_samples_per_interpolation = 16893
+        z1 = torch.randn(n_interpolations, 102).cuda() if cuda else torch.randn(n_interpolations, 102)
+        z2 = torch.randn(n_interpolations, 102).cuda() if cuda else torch.randn(n_interpolations, 102)
 
         samples = []
         for i in range(n_interpolations):
@@ -118,9 +87,7 @@ def sample_runs():
 
 """--------------------------------------------------model training--------------------------------------------------"""
 for epoch in range(100):
-    if epoch % 20 == 0:
-        AAE_archi.apply_pruning_to_model(encoder_generator)
-    for i, (X, y) in enumerate(dataloader):
+    for i, (X, y) in enumerate(AAE_archi.dataloader):
         valid = torch.ones((X.shape[0], 1), requires_grad=False).cuda() if cuda else torch.ones((X.shape[0], 1),
                                                                                                    requires_grad=False)
         fake = torch.zeros((X.shape[0], 1), requires_grad=False).cuda() if cuda else torch.zeros((X.shape[0], 1),
@@ -149,23 +116,42 @@ for epoch in range(100):
 
         d_loss.backward()
         optimizer_D.step()
-        # pruning_scheduler.step()
-    # scheduler_G.step()
-    # scheduler_D.step()
+
+        scheduler_G.step()
+        scheduler_D.step()
+    if epoch == 20:
+        print("apply")
+        AAE_archi.apply_pruning(encoder_generator)
+    if epoch == 60:
+        print("remove")
+        AAE_archi.remove_pruning(encoder_generator)
+    d_output_real = real_loss.mean().item()
+    d_output_fake = fake_loss.mean().item()
+    if d_output_real < 0.5 or d_output_fake > 0.5:
+        for param_group in optimizer_G.param_groups:
+            param_group['lr'] *= 1.05
+    else:
+        for param_group in optimizer_G.param_groups:
+            param_group['lr'] *= 0.95
     print(epoch, d_loss.item(), g_loss.item())
 
-# samples = sample_runs(74100, 111)
-samples = sample_runs()
-samples = samples.detach().cpu()
-np.savetxt("3.txt", samples)
-print("sample saved")
+
+    batches_done = epoch * len(AAE_archi.dataloader) + i
+    if batches_done % 400 == 0:
+        samples = sample_runs()
+        samples = samples.detach().cpu()
+        np.savetxt("2.txt", samples)
+        print("sample saved")
+
+# samples = sample_runs(16893, 46)
+# print("sample saved")
 
 """--------------------------------------------------model testing---------------------------------------------------"""
 n_splits = 5
 kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 recon_losses = []
 adversarial_losses = []
-for fold, (X, y) in enumerate(kf.split(val_dl)):
+for fold, (X, y) in enumerate(kf.split(AAE_archi.val_dl)):
     print(f"Fold {fold + 1}/{n_splits}")
     fold_recon_loss = []
     fold_adversarial_loss = []
