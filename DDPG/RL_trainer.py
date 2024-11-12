@@ -12,6 +12,7 @@ from RL import TD3
 # from torch.utils.tensorboard import SummaryWriter
 import pickle
 
+cuda = False
 
 def evaluate_policy(policy, dataloader, env, episode_num=10, t=None):
     avg_reward = 0.
@@ -34,7 +35,7 @@ def evaluate_policy(policy, dataloader, env, episode_num=10, t=None):
 
 
 class Trainer(object):
-    def __init__(self, train_loader, valid_loader, model_encoder, model_d):
+    def __init__(self, train_loader, valid_loader, model_encoder, model_d, model_De):
         np.random.seed(5)
         torch.manual_seed(5)
 
@@ -51,17 +52,18 @@ class Trainer(object):
         self.start_timesteps = 50
         self.max_episodes_steps = 1000000
 
-        self.z_dim = 27
+        self.z_dim = 12
         self.max_action = 1
         self.expl_noise = 0.2
 
         self.encoder = model_encoder
         self.D = model_d
+        self.De = model_De
 
-        self.env = Env(self.encoder, self.D)
+        self.env = Env(self.encoder, self.D, self.De)
 
-        self.state_dim = 37
-        self.action_dim = 27
+        self.state_dim = 27
+        self.action_dim = 12
         self.max_action = 1
 
         self.policy = TD3(self.state_dim, self.action_dim, self.max_action, 0.0005, self.batch_size_actor,
@@ -101,7 +103,6 @@ class Trainer(object):
 
         # get state and corresponding target value
         state_t, label = self.train_loader.next_data()
-        print("label", label.shape)
         state = self.env.set_state(state_t)
         episode_target = (torch.randint(10, label.shape) + label) % 10
 
@@ -124,7 +125,7 @@ class Trainer(object):
                 ).clip(-self.max_action, self.max_action)
                 # action = self.policy.select_action(state)
                 action = np.float32(action)
-                action_t = torch.tensor(action).to("cuda") if torch.cuda.is_available() else torch.tensor(action)
+                action_t = torch.tensor(action).to("cuda") if cuda else torch.tensor(action)
 
             # Perform action
             next_state, reward, done, _ = self.env(action_t, episode_target)
@@ -138,7 +139,6 @@ class Trainer(object):
 
             # Train agent after collecting sufficient data
             if t >= self.start_timesteps:
-                print("replay buffer", next_state.shape)
                 self.policy.train(self.replay_buffer)
 
             if done:
@@ -165,7 +165,7 @@ class Trainer(object):
 
                 valid_episode_num = 6
                 self.evaluations.append(evaluate_policy(self.policy, self.valid_loader, self.env,
-                                                        episode_num=valid_episode_num, save_fig=True, t=t))
+                                                        episode_num=valid_episode_num, t=t))
                 eval_result = "evaluation over {} episodes: {}".format(valid_episode_num, self.evaluations[-1])
                 print(eval_result)
 
