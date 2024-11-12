@@ -26,14 +26,10 @@ class RL_dataloader:
     def next_data(self):
         try:
             data, label = next(self.loader_iter)
-            # print("data try utils", data.shape)
-            # print("label try utils", label.shape)
 
         except:
             self.loader_iter = iter(self.loader)
             data, label = next(self.loader_iter)
-            # print("data exc utils", data.shape)
-            # print("label exc utils", label.shape)
 
         return data, label
 
@@ -92,7 +88,6 @@ class ReplayBuffer(object):
             r.append(np.array(R, copy=False))
             d.append(np.array(D, copy=False))
             t.append(np.array(T, copy=False))
-        # print("util", np.array(x).squeeze(0).shape, np.array(y).squeeze(0).shape, np.array(u).squeeze(0).shape, np.array(r).squeeze(0).shape, np.array(d).squeeze(0).reshape(-1, 1).shape, np.array(t).squeeze(0).shape)
 
         return np.array(x).squeeze(0), np.array(y).squeeze(0), np.array(u).squeeze(0), np.array(r).squeeze(0), np.array(d).squeeze(0).reshape(-1, 1), np.array(t).squeeze(0)
 
