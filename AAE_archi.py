@@ -1,17 +1,15 @@
-import numpy as np
 import torch
 from scipy.stats import exponpow, cauchy, gamma, norm, rayleigh, expon, chi
-from sklearn.model_selection import train_test_split
 from torch import exp
-from torch.nn import Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Softmax, MSELoss, CrossEntropyLoss
+from torch.nn import ModuleDict, Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Softmax, MSELoss, CrossEntropyLoss
 from torch.utils.data import DataLoader, Dataset
 from data import main_u
 
 in_out = 26
-z_dim = 18
+z_dim = 15
 
-cuda = False
-label_dim = 10
+cuda = True if torch.cuda.is_available() else False
+label_dim = 1
 
 
 
@@ -65,20 +63,34 @@ class EncoderGenerator(Module):
     def __init__(self, in_out):
         super(EncoderGenerator, self).__init__()
         dim = in_out
-        seq = [Linear(dim, 22),
-               LeakyReLU(),
-               BatchNorm1d(22),
-               Linear(22, 20),
-               LeakyReLU(),
-               BatchNorm1d(20),
-               Linear(20, 19),
-               LeakyReLU(),
-               BatchNorm1d(19)
+        self.h1 = 25
+        self.h2 = 22
+        self.h3 = 15
 
+        seq = [
+
+            Linear(dim, self.h1),
+            LeakyReLU(),
+            BatchNorm1d(self.h1),
+            Linear(self.h1, self.h1),
+            LeakyReLU(),
+            BatchNorm1d(self.h1),
+            Linear(self.h1, self.h2),
+            LeakyReLU(),
+            BatchNorm1d(self.h2),
+            Linear(self.h2, self.h2),
+            LeakyReLU(),
+            BatchNorm1d(self.h2),
+            Linear(self.h2, self.h3),
+            LeakyReLU(),
+            BatchNorm1d(self.h3),
+            Linear(self.h3, dim),
+            LeakyReLU(),
+            BatchNorm1d(dim)
                ]
         self.seq = Sequential(*seq)
-        self.mu = Linear(19, z_dim)
-        self.logvar = Linear(19, z_dim)
+        self.mu = Linear(dim, z_dim)
+        self.logvar = Linear(dim, z_dim)
 
 
     def forward(self, x):
@@ -94,27 +106,46 @@ class Decoder(Module):
         super(Decoder, self).__init__()
         self.discrete_features = discrete_features
         self.continuous_features = continuous_features
+        self.h1 = 15
+        self.h2 = 22
+        self.h3 = 25
 
         self.shared = Sequential(
-            Linear(dim, 19),
+            Linear(dim, self.h1),
             LeakyReLU(),
-            BatchNorm1d(19)
+            BatchNorm1d(self.h1),
+            Linear(self.h1, self.h2),
+            LeakyReLU(),
+            BatchNorm1d(self.h2),
+            Linear(self.h2, self.h3),
+            LeakyReLU(),
+            BatchNorm1d(self.h3),
+            Linear(self.h3, self.h3),
+            LeakyReLU(),
+            BatchNorm1d(self.h3),
+            Linear(self.h3, in_out),
+            LeakyReLU(),
+            BatchNorm1d(in_out)
         )
 
-        self.discrete_out = {feature: Linear(19, num_classes)
+        self.discrete_out = {feature: Linear(in_out, num_classes)
                              for feature, num_classes in discrete_features.items()}
-        self.continuous_out = {feature: Linear(19, 1)
+        self.continuous_out = {feature: Linear(in_out, 1)
                                for feature in continuous_features}
 
-        self.discrete_out = torch.nn.ModuleDict(self.discrete_out)
-        self.continuous_out = torch.nn.ModuleDict(self.continuous_out)
+        self.discrete_out = ModuleDict(self.discrete_out)
+        self.continuous_out = ModuleDict(self.continuous_out)
 
         self.ce = CrossEntropyLoss()
         self.mse = MSELoss()
         self.softmax = Softmax(dim=-1)
         self.tanh = Tanh()
 
-    def forward(self, x):
+    def forward(self, output):
+        x = self.shared(output)
+        return x
+
+    def disc_cont(self, x):
         shared_features = self.shared(x)
 
         discrete_outputs = {}
@@ -129,34 +160,66 @@ class Decoder(Module):
 
         return discrete_outputs, continuous_outputs
 
+
+
     def compute_loss(self, outputs, targets):
         discrete_outputs, continuous_outputs = outputs
+        discrete_targets, continuous_targets = targets
         total_loss = 0
         for feature in self.discrete_features:
             if feature in targets:
-                total_loss += self.ce(discrete_outputs[feature], targets[feature])
+                total_loss += self.ce(discrete_outputs[feature], discrete_targets[feature])
         for feature in self.continuous_features:
             if feature in targets:
-                total_loss += self.mse(continuous_outputs[feature], targets[feature])
+                total_loss += self.mse(continuous_outputs[feature], continuous_targets[feature])
 
         return total_loss
+
+
+
 
 
 class Discriminator(Module):
     def __init__(self, dim):
         super(Discriminator, self).__init__()
+        self.h1 = 10
+        self.h2 = 10
+        self.h3 = 5
+        # self.h4 = 5
         seq = [
-            Linear(dim, 2),
+            Linear(dim, self.h1),
             LeakyReLU(),
-            Attention(2, 2),
-            Linear(2, 1),
+            Linear(self.h1, self.h2),
             LeakyReLU(),
-            Dropout(0.5),
+            Dropout(0.2),
+            Linear(self.h2, self.h3),
+            LeakyReLU(),
+            Attention(self.h3, 3),
+            # Linear(self.h3, self.h4),
+            # LeakyReLU(),
+            # Attention(self.h4, 3),
+            Linear(self.h3, 1),
             Sigmoid()]
         self.seq = Sequential(*seq)
     def forward(self, x):
         x = self.seq(x)
         return x
+
+
+discrete = {"proto": 132,
+            "service": 13,
+            "state": 7,
+            "is_ftp_login": 4,
+            "ct_flw_http_mthd": 11,
+            'ct_state_ttl': 16,
+}
+
+continuous = [feature for feature in main_u.X_train.columns if feature not in discrete]
+
+encoder_generator = EncoderGenerator(in_out, ).cuda() if cuda else EncoderGenerator(in_out, )
+decoder = Decoder(z_dim+ label_dim, discrete, continuous).cuda() if cuda else Decoder(z_dim+ label_dim, discrete, continuous)
+discriminator = Discriminator(z_dim, ).cuda() if cuda else Discriminator(z_dim, )
+
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels):
@@ -172,7 +235,7 @@ class CustomDataset(Dataset):
         return sample, label
 
 
-X_train, X_val, y_train, y_val = train_test_split(main_u.X_train_sc, main_u.y_train, test_size=0.1, random_state=48)
+X_train, X_val, y_train, y_val = main_u.vertical_split(main_u.X_train_sc, main_u.y_train)
 dataset = CustomDataset(X_train, y_train)
 dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 val = CustomDataset(X_val, y_val)
@@ -180,18 +243,4 @@ val_dl = DataLoader(val, batch_size=6)
 test = CustomDataset(main_u.X_test_sc, main_u.y_test)
 test_dl = DataLoader(test, batch_size=32, shuffle=True, num_workers=4)
 
-discrete = {"proto": 132,
-            "service": 13,
-            "state": 7,
-            "is_ftp_login": 4,
-            "ct_flw_http_mthd": 11}
 
-continuous = ['id', 'dur', 'spkts', 'dpkts', 'rate',
-       'sttl', 'dttl', 'sload', 'dload', 'sinpkt', 'dinpkt', 'sjit', 'djit',
-       'swin', 'tcprtt', 'smean', 'dmean', 'trans_depth', 'response_body_len',
-       'ct_srv_src', 'ct_state_ttl']
-
-
-encoder_generator = EncoderGenerator(in_out, ).cuda() if cuda else EncoderGenerator(in_out, )
-decoder = Decoder(z_dim+ label_dim, discrete, continuous).cuda() if cuda else Decoder(z_dim+ label_dim, discrete, continuous)
-discriminator = Discriminator(z_dim, ).cuda() if cuda else Discriminator(z_dim, )
