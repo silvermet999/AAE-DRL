@@ -230,6 +230,10 @@ X_train_disc = X_train[["proto", "service", "state", "is_ftp_login", "ct_flw_htt
 X_train_cont = main_u.mac(X_train[[feature for feature in X_train.columns if feature not in X_train_disc]])
 X_train_sc = np.concatenate((X_train_disc, X_train_cont), axis=1)
 
+X_test_disc = X_test[["proto", "service", "state", "is_ftp_login", "ct_flw_http_mthd"]].to_numpy()
+X_test_cont = main_u.mac(X_test[[feature for feature in X_test.columns if feature not in X_test_disc]])
+X_test_sc = np.concatenate((X_test_disc, X_test_cont), axis=1)
+
 y_train = y_train.to_numpy()
 
 classifier = TabNetModel()
