@@ -1,15 +1,12 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
-import os
 from collections import defaultdict
-
-from imblearn.pipeline import make_pipeline
 from scipy import stats
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, RobustScaler, MaxAbsScaler, StandardScaler, MinMaxScaler
+from sklearn.preprocessing import LabelEncoder, RobustScaler, MaxAbsScaler, StandardScaler, MinMaxScaler, \
+    PolynomialFeatures
 from sklearn.model_selection import train_test_split
 from fitter import Fitter, get_common_distributions
-from ydata_profiling import ProfileReport
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -36,11 +33,13 @@ df.fillna('Missing', inplace=True)
 
 le = LabelEncoder()
 cols_le = ["attack_cat", "proto", "service", "state"]
+mappings = {}
 
-for i in cols_le:
-    df[i] = le.fit_transform(df[i])
-#     label_mappings[i] = dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))
-# for col, mapping in label_mappings.items():
+for col in cols_le:
+    df[col] = le.fit_transform(df[col])
+#     mappings[col] = dict(zip(le.classes_, le.transform(le.classes_)))
+# #
+# for col, mapping in mappings.items():
 #     print(f"Mapping for {col}: {mapping}")
 
 for col in cols_le:
@@ -80,28 +79,36 @@ def corr(df):
 
 
 """-----------------------------------------------vertical data split-----------------------------------------------"""
+def vertical_split(X, y):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=45)
+    return X_train, X_test, y_train, y_test
+
+# df = df[df["attack_cat"].isin([6, 5, 3, 4, 2, 7])]
+
 X = corr(df.drop(["attack_cat", "label"], axis = 1))
-y = df["attack_cat"]
+y_bin = df["label"]
 
-y = pd.get_dummies(y).astype(int)
-cols = ['Normal', 'Backdoor', 'Analysis', 'Fuzzers', 'Shellcode',
-       'Reconnaissance', 'Exploits', 'DoS', 'Worms', 'Generic']
-y = y.rename(columns = dict(zip(y.columns, cols)))
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=45)
+X_train, X_test, y_train, y_test = vertical_split(X, y_bin)
 
-def min_max(df):
-    scaler = MinMaxScaler()
+
+poly = PolynomialFeatures(2)
+# poly.fit_transform(X)
+
+def mac(df):
+    scaler = MaxAbsScaler()
     df = scaler.fit_transform(df)
     return df
 
-X_train_sc = min_max(X_train)
-X_test_sc = min_max(X_test)
+X_train_disc = X_train[["proto", "service", "state", "is_ftp_login", "ct_flw_http_mthd", "ct_state_ttl"]]
+X_test_disc = X_test[["proto", "service", "state", "is_ftp_login", "ct_flw_http_mthd", "ct_state_ttl"]]
+
+X_train_cont = mac(X_train[[feature for feature in X_train.columns if feature not in X_train_disc]])
+X_test_cont = mac(X_test[[feature for feature in X_test.columns if feature not in X_test_disc]])
+
+X_train_sc = np.concatenate((X_train_disc, X_train_cont), axis=1)
+X_test_sc = np.concatenate((X_test_disc, X_test_cont), axis=1)
 y_train = y_train.to_numpy()
-
-
-
-# profile.to_file("report_u.html")
 #
 #
 # def kolmogorov_smirnov_test(column, dist='norm'):
