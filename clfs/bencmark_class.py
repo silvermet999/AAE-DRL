@@ -46,5 +46,6 @@ roc_auc = roc_auc_score(y_test, y_pred, multi_class='ovr')
 # report = classification_report(y_test, y_pred)
 
 
+# GB [I 2024-12-11 00:14:15,485] Trial 0 finished with value: 0.753581948152614 and parameters: {'gb_n_estimators': 28, 'gb_learning_rate': 0.04836473659876455, 'gb_max_depth': 11}. Best is trial 0 with value: 0.753581948152614.
 
 # RF [I 2024-12-10 13:28:03,055] Trial 29 finished with value: 0.7544742054947895 and parameters: {'rf_max_depth': 16, 'rf_n_estimators': 134}. Best is trial 29 with value: 0.7544742054947895.
