@@ -5,13 +5,15 @@ import torch.nn.functional as F
 import copy
 import os
 
-cuda= False
-
+cuda = True if torch.cuda.is_available() else False
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
-        self.l1 = nn.Linear(state_dim+10, 12)
-        self.l2 = nn.Linear(12, action_dim)
+        self.l1 = nn.Linear(state_dim+4, 22)
+        self.l2 = nn.Linear(22, 18)
+        self.l3 = nn.Linear(18, 14)
+        self.l4 = nn.Linear(14, 10)
+        self.l5 = nn.Linear(10, action_dim)
 
         self.max_action = max_action
 
@@ -19,26 +21,38 @@ class Actor(nn.Module):
         sa = torch.cat([state, target.cuda() if cuda else target], dim=1)
 
         a = F.relu(self.l1(sa))
-        a = self.max_action * torch.tanh(self.l2(a))
+        a = F.relu(self.l2(a))
+        a = F.relu(self.l3(a))
+        a = F.relu(self.l4(a))
+        a = self.max_action * torch.tanh(self.l5(a))
         return a  # (values in range [-max_action, max_action])
 
 
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
-        self.l1 = nn.Linear(state_dim + action_dim + 10, 25)
-        self.l2 = nn.Linear(25, 1)
-        self.l3 = nn.Linear(state_dim + action_dim + 10, 25)
-        self.l4 = nn.Linear(25, 1)
+        self.l1 = nn.Linear(state_dim + action_dim + 4, 24)
+        self.l2 = nn.Linear(24, 14)
+        self.l3 = nn.Linear(14, 4)
+        self.l4 = nn.Linear(4, 1)
+
+        self.l5 = nn.Linear(state_dim + action_dim + 4, 24)
+        self.l6 = nn.Linear(24, 14)
+        self.l7 = nn.Linear(14, 4)
+        self.l8 = nn.Linear(4, 1)
 
     def forward(self, state, action, target):
         sa = torch.cat([state, action, target], 1)
 
-        q1 = F.relu(self.l1(sa))
-        q1 = self.l2(q1)
+        q1 = F.relu(self.l1(sa))  # B x (state_dim + action_dim) ---> B x 256
+        q1 = F.relu(self.l2(q1))  # B x 256 ---> B x 256
+        q1 = F.relu(self.l3(q1))  # B x 256 ---> B x 1
+        q1 = self.l4(q1)
 
-        q2 = F.relu(self.l3(sa))
-        q2 = self.l4(q2)
+        q2 = F.relu(self.l5(sa))  # B x (state_dim + action_dim) ---> B x 256
+        q2 = F.relu(self.l6(q2))  # B x 256 ---> B x 256
+        q2 = F.relu(self.l7(q2))  # B x 256 ---> B x 1
+        q2 = self.l8(q2)
         return q1, q2
 
     def Q1(self, state, action, target):
@@ -75,6 +89,7 @@ class TD3(object):
 
     def train(self, replay_buffer):
         s, n_s, a, r, not_d, t = replay_buffer.sample()
+
         state = torch.FloatTensor(s).to("cuda") if cuda else torch.FloatTensor(s)
         next_state = torch.FloatTensor(n_s).to("cuda") if cuda else torch.FloatTensor(n_s)
         action = torch.FloatTensor(a).to("cuda") if cuda else torch.FloatTensor(a)
@@ -86,7 +101,6 @@ class TD3(object):
             noise = (
                     torch.randn_like(action) * self.policy_noise
             ).clamp(-self.noise_clip, self.noise_clip)
-            # noise = noise.transpose(1,2)
             next_action = (
                     self.actor_target(next_state, target) + noise
             ).clamp(-self.max_action, self.max_action)
@@ -124,10 +138,20 @@ class TD3(object):
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-if __name__ == "__main__":
-    actor = Actor(state_dim=30, action_dim=1, max_action=10)
-    critic = Critic(state_dim=30, action_dim=1)
-    s = torch.FloatTensor(np.random.rand(5, 30))
-    a = actor(s)
-    n_s = critic(s, a)
-    print('finished')
+
+    def save(self, filename):
+        torch.save(self.critic.state_dict(), filename + "_critic")
+        torch.save(self.critic_optimizer.state_dict(), filename + "_critic_optimizer")
+
+        torch.save(self.actor.state_dict(), filename + "_actor")
+        torch.save(self.actor_optimizer.state_dict(), filename + "_actor_optimizer")
+
+
+    def load(self, filename):
+        self.critic.load_state_dict(torch.load(filename + "_critic"))
+        self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer"))
+        self.critic_target = copy.deepcopy(self.critic)
+
+        self.actor.load_state_dict(torch.load(filename + "_actor"))
+        self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer"))
+        self.actor_target = copy.deepcopy(self.actor)
