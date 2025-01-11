@@ -6,7 +6,7 @@ from EnvClass import Env
 
 import numpy as np
 
-from utils import ReplayBuffer, RL_dataloader
+from utils import RL_dataloader
 from RL import TD3
 from AAE import AAE_archi_opt
 from clfs import classifier
@@ -26,8 +26,8 @@ def evaluate_policy(policy, dataloader, env, episode_num=10, t=None):
         done = False
         episodeTarget = (label + torch.randint(4, label.shape))
         while not done:
-            action = policy.select_action(np.array(obs), episodeTarget)
-            action = torch.tensor(action) #.unsqueeze(dim=0)
+            action = policy.select_action(np.array(obs))
+            action = torch.tensor(action)
             new_state, reward, done, _ = env(action, episodeTarget, t)
             avg_reward += reward
 
@@ -37,7 +37,7 @@ def evaluate_policy(policy, dataloader, env, episode_num=10, t=None):
 
 
 class Trainer(object):
-    def __init__(self, train_loader, valid_loader, model_encoder, model_d, model_De, classifier):
+    def __init__(self, train_loader, valid_loader, model_encoder, model_d, model_De, classifier, in_out):
         np.random.seed(5)
         torch.manual_seed(5)
 
@@ -48,14 +48,12 @@ class Trainer(object):
         self.epoch_size = len(self.valid_loader)
         self.max_timesteps = 100000
 
-        self.batch_size = 32
-        self.batch_size_actor = 32
+        self.batch_size = 2
+        self.batch_size_actor = 2
         self.eval_freq = 1000
         self.start_timesteps = 50
         self.max_episodes_steps = 1000000
 
-        self.z_dim = 8
-        self.max_action = 1
         self.expl_noise = 0
 
         self.encoder = model_encoder
@@ -65,14 +63,12 @@ class Trainer(object):
 
         self.env = Env(self.encoder, self.D, self.De, self.classifier)
 
-        self.state_dim = 22
-        self.action_dim = 8
+        self.state_dim = in_out
+        self.action_dim = 14
+        self.discrete_features = AAE_archi_opt.discrete
         self.max_action = 1
 
-        self.policy = TD3(self.state_dim, self.action_dim, self.max_action, 0.001, self.batch_size_actor,
-                          0.99, 0.005, 0.2, 0.5, 2)
-
-        self.replay_buffer = ReplayBuffer()
+        self.policy = TD3(self.state_dim, self.action_dim, self.discrete_features, self.max_action)
 
         self.continue_timesteps = 0
 
@@ -91,30 +87,22 @@ class Trainer(object):
         done = False
         self.env.reset()
 
-        print('start/continue model from t: {}'.format(self.continue_timesteps))
-        print('start buffer length: {}'.format(len(self.replay_buffer)))
         for t in range(int(self.continue_timesteps), int(self.max_timesteps)):
             episode_timesteps += 1
-            if t < self.start_timesteps:
-                action_t = torch.randn(self.batch_size, self.z_dim)
-                action = action_t.detach().cpu().numpy()
-            else:
-                action = (
-                        self.policy.select_action(state, episode_target)
-                        + np.random.normal(0, self.max_action * self.expl_noise, size=self.action_dim)
-                ).clip(-self.max_action, self.max_action)
-                action = np.float32(action)
-                action_t = torch.tensor(action).to("cuda") if cuda else torch.tensor(action)
 
-            next_state, reward, done, _ = self.env(action_t, episode_target)
+            continuous_act, discrete_act = self.policy.select_action(state)
 
-            self.replay_buffer.add((state, next_state, action, reward, done, episode_target))
+            next_state, reward, done, _ = self.env(continuous_act, discrete_act, episode_target)
+
+            self.policy.store_transition(state, continuous_act, discrete_act,
+                          next_state, reward, done)
 
             state = next_state
             episode_reward += reward
 
             if t >= self.start_timesteps:
-                self.policy.train(self.replay_buffer)
+                state, continuous_act, discrete_act, next_state, reward, done
+                self.policy.train(self.batch_size)
 
             if done:
                 state_t, label = self.train_loader.next_data()
@@ -143,13 +131,17 @@ class Trainer(object):
                 print(eval_result)
 
 
-train_loader, val_loader = AAE_archi_opt.dataset_function(AAE_archi_opt.dataset, train=True)
+
+train_loader, val_loader = AAE_archi_opt.dataset_function(AAE_archi_opt.dataset, batch_size=2, train=True)
 encoder_generator = AAE_archi_opt.encoder_generator
-decoder = AAE_archi_opt.Decoder(8, AAE_archi_opt.discrete, AAE_archi_opt.continuous, AAE_archi_opt.binary).cuda() if cuda else (
-    AAE_archi_opt.Decoder(8, AAE_archi_opt.discrete, AAE_archi_opt.continuous, AAE_archi_opt.binary))
+decoder = AAE_archi_opt.decoder
+
+
 discriminator = AAE_archi_opt.discriminator
 discriminator.eval()
 classifier = classifier.classifier
 classifier.eval()
 
-trainer = Trainer(train_loader, val_loader, encoder_generator, discriminator, decoder, classifier)
+
+
+trainer = Trainer(train_loader, val_loader, encoder_generator, discriminator, decoder, classifier, 32)
