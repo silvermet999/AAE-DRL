@@ -155,11 +155,27 @@ class TD3(object):
 
         # Sample replay buffer
         batch = random.sample(self.replay_buffer, batch_size)
-        state, continuous_action, discrete_actions, next_state, reward, done = map(np.stack, zip(*batch))
+        batch_tensors = [(torch.FloatTensor(state),
+                          continuous_action,
+                          torch.tensor(list(discrete_actions.values())),
+                          torch.FloatTensor(next_state),
+                          torch.FloatTensor([reward]),
+                          torch.FloatTensor([done]))
+                         for state, continuous_action, discrete_actions, next_state, reward, done in batch]
+
+        # Then unzip and stack
+        state = torch.stack([b[0] for b in batch_tensors])
+        continuous_action = torch.stack([b[1] for b in batch_tensors])
+        discrete_actions = torch.stack([b[2] for b in batch_tensors])
+        next_state = torch.stack([b[3] for b in batch_tensors])
+        reward = torch.stack([b[4] for b in batch_tensors])
+        done = torch.stack([b[5] for b in batch_tensors])
+
+        # state, continuous_action, discrete_actions, next_state, reward, done = map(np.stack, zip(*batch))
 
         # Convert to tensors
         state = torch.FloatTensor(state).cuda() if cuda else torch.FloatTensor(state)
-        continuous_action = torch.FloatTensor(continuous_action).cuda() if cuda else torch.FloatTensor(continuous_action)
+        continuous_action = continuous_action.cuda() if cuda else continuous_action
         next_state = torch.FloatTensor(next_state).cuda() if cuda else torch.FloatTensor(next_state)
         reward = torch.FloatTensor(reward).reshape(-1, 1).cuda() if cuda else torch.FloatTensor(reward).reshape(-1, 1)
         done = torch.FloatTensor(done).reshape(-1, 1).cuda() if cuda else torch.FloatTensor(done).reshape(-1, 1)
