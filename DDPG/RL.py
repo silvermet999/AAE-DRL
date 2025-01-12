@@ -41,16 +41,16 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim, discrete_features):
+    def __init__(self, state_dim, action_dim, discrete_ranges):
         super(Critic, self).__init__()
-        self.discrete_features = discrete_features
+        self.discrete_ranges = discrete_ranges
 
         # Calculate total discrete outputs
-        total_discrete_outputs = sum(ranges for ranges in discrete_features.values())
+        # total_discrete_outputs = sum(ranges for ranges in discrete_features.values())
 
         # Q1 Architecture
         self.q1 = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 25),
+            nn.Linear(state_dim + action_dim + 1, 25),
             nn.ReLU(),
             nn.Linear(25, 25),
             nn.ReLU(),
@@ -59,7 +59,7 @@ class Critic(nn.Module):
 
         # Q2 Architecture (Twin critic for TD3 part)
         self.q2 = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 25),
+            nn.Linear(state_dim + action_dim + 1, 25),
             nn.ReLU(),
             nn.Linear(25, 25),
             nn.ReLU(),
@@ -69,17 +69,17 @@ class Critic(nn.Module):
         # DDQN heads for discrete actions
         self.discrete_q = nn.ModuleDict({
             name: nn.Sequential(
-                nn.Linear(state_dim + action_dim, 25),
+                nn.Linear(state_dim + action_dim + 1, 25),
                 nn.ReLU(),
                 nn.Linear(25, 25),
                 nn.ReLU(),
                 nn.Linear(25, num_actions)  # Q-values for each discrete action
-            ) for name, num_actions in discrete_features.items()
+            ) for name, num_actions in discrete_ranges.items()
         })
 
-    def forward(self, state, continuous_action):
+    def forward(self, state, continuous_action, target):
         # Concatenate state and continuous action
-        sa = torch.cat([state, continuous_action], 1)
+        sa = torch.cat([state, continuous_action, target.unsqueeze(1)], 1)
 
         # Get TD3-style Q-values
         q1_cont = self.q1(sa)
@@ -94,10 +94,11 @@ class Critic(nn.Module):
         return q1_cont, q2_cont, discrete_q_values
 
 class TD3(object):
-    def __init__(self, state_dim, action_dim, discrete_features, max_action):
+    def __init__(self, state_dim, action_dim, discrete_features, max_action, target):
         self.max_action = max_action
         self.continuous_dims = action_dim
         self.discrete_ranges = discrete_features
+        self.target = target
 
         # Initialize actor for continuous actions
         self.actor = Actor(state_dim, action_dim, discrete_features, max_action).cuda() if cuda else (
@@ -125,7 +126,7 @@ class TD3(object):
         self.noise_clip = 0.5 * max_action
         self.policy_freq = 2
         self.total_it = 0
-        self.replay_buffer = deque(maxlen=1000000)
+        self.replay_buffer = utils.ReplayBuffer()
 
 
     def select_action(self, state):
@@ -136,7 +137,7 @@ class TD3(object):
             continuous_actions = self.actor(state_tensor)
 
             # Get Q-values for discrete actions
-            sa = torch.cat([state_tensor, (continuous_actions.cuda() if cuda else continuous_actions)], 1)
+            sa = torch.cat([state_tensor, (continuous_actions.cuda() if cuda else continuous_actions), self.target.unsqueeze(1)], 1)
             discrete_actions = {}
 
             # Epsilon-greedy selection for discrete actions
@@ -150,35 +151,17 @@ class TD3(object):
 
             return continuous_actions, discrete_actions
 
-    def train(self, batch_size=2):
+    def train(self):
         self.total_it += 1
 
-        # Sample replay buffer
-        batch = random.sample(self.replay_buffer, batch_size)
-        batch_tensors = [(torch.FloatTensor(state),
-                          continuous_action,
-                          torch.tensor(list(discrete_actions.values())),
-                          torch.FloatTensor(next_state),
-                          torch.FloatTensor([reward]),
-                          torch.FloatTensor([done]))
-                         for state, continuous_action, discrete_actions, next_state, reward, done in batch]
+        state, continuous_action, discrete_action, next_state, reward, done, target = self.replay_buffer.sample()
 
-        # Then unzip and stack
-        state = torch.stack([b[0] for b in batch_tensors])
-        continuous_action = torch.stack([b[1] for b in batch_tensors])
-        discrete_actions = torch.stack([b[2] for b in batch_tensors])
-        next_state = torch.stack([b[3] for b in batch_tensors])
-        reward = torch.stack([b[4] for b in batch_tensors])
-        done = torch.stack([b[5] for b in batch_tensors])
-
-        # state, continuous_action, discrete_actions, next_state, reward, done = map(np.stack, zip(*batch))
-
-        # Convert to tensors
         state = torch.FloatTensor(state).cuda() if cuda else torch.FloatTensor(state)
-        continuous_action = continuous_action.cuda() if cuda else continuous_action
+        continuous_action = torch.FloatTensor(continuous_action).cuda() if cuda else torch.FloatTensor(continuous_action)
         next_state = torch.FloatTensor(next_state).cuda() if cuda else torch.FloatTensor(next_state)
         reward = torch.FloatTensor(reward).reshape(-1, 1).cuda() if cuda else torch.FloatTensor(reward).reshape(-1, 1)
         done = torch.FloatTensor(done).reshape(-1, 1).cuda() if cuda else torch.FloatTensor(done).reshape(-1, 1)
+        target = torch.FloatTensor(target).cuda() if cuda else torch.FloatTensor(target)
 
         with torch.no_grad():
             # Select next continuous actions with noise
@@ -190,7 +173,7 @@ class TD3(object):
             ).clamp(-self.max_action, self.max_action)
 
             # Compute target Q values
-            target_Q1, target_Q2, target_discrete_Q = self.critic_target(next_state, next_continuous_action)
+            target_Q1, target_Q2, target_discrete_Q = self.critic_target(next_state, next_continuous_action, target)
             target_Q = torch.min(target_Q1, target_Q2)
 
             # Final targets for continuous Q values
@@ -204,16 +187,20 @@ class TD3(object):
                 discrete_targets[name] = reward + (1 - done) * 0.99 * next_q_value
 
         # Get current Q estimates
-        current_Q1, current_Q2, current_discrete_Q = self.critic(state, continuous_action)
+        current_Q1, current_Q2, current_discrete_Q = self.critic(state, continuous_action, target)
 
         # Compute critic losses
         critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
         # Add discrete action losses
+        # current_q_list = []  # Initialize list to store Q-values
         for name in self.discrete_ranges.keys():
-            discrete_action_tensor = torch.LongTensor(discrete_actions[name]).cuda() if cuda else torch.LongTensor(discrete_actions[name])
-            current_q = current_discrete_Q[name].gather(1, discrete_action_tensor.unsqueeze(1))
-            critic_loss += F.mse_loss(current_q, discrete_targets[name])
+            discrete_action_tensor = torch.LongTensor(discrete_action[:, 1].astype(int)).cuda() if cuda else torch.LongTensor(discrete_action[:, 1].astype(int))
+            discrete_action_tensor = discrete_action_tensor.unsqueeze(0)
+            # current_q = current_discrete_Q[name].gather(1, discrete_action_tensor)
+            # current_q_list.append(current_q)
+
+            critic_loss += F.mse_loss(current_discrete_Q[name], discrete_targets[name])
 
         # Optimize the critic
         self.critic_optimizer.zero_grad()
@@ -224,7 +211,7 @@ class TD3(object):
         if self.total_it % self.policy_freq == 0:
             # Compute actor loss (only for continuous actions)
             continuous_actions = self.actor(state)
-            actor_loss = -self.critic.q1(state, continuous_actions).mean()
+            actor_loss = -self.critic.q1(torch.cat([state, continuous_actions, target.unsqueeze(1)], dim=1)).mean()
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
@@ -241,8 +228,8 @@ class TD3(object):
         # Update epsilon
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
-    def store_transition(self, state, continuous_action, discrete_actions, next_state, reward, done):
-        self.replay_buffer.append((state, continuous_action, discrete_actions, next_state, reward, done))
+    def store_transition(self, state, continuous_action, discrete_actions, next_state, reward, done, target):
+        self.replay_buffer.add((state, continuous_action, discrete_actions, next_state, reward, done, target))
 
 
     def save(self, filename):
