@@ -10,13 +10,17 @@ credits: https://github.com/KrisKorrel/sparsemax-pytorch/blob/master/sparsemax.p
 
 from __future__ import division
 
+import pandas as pd
 import torch
 import torch.nn as nn
 import numpy as np
+from torch.utils.data import DataLoader
+
 from data import main_u
+from AAE import AAE_archi_opt
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+#
 
 class Sparsemax(nn.Module):
     """Sparsemax function."""
@@ -109,15 +113,15 @@ class TabNetModel(nn.Module):
 
     def __init__(
             self,
-            columns=3,
-            num_features=26,
-            feature_dims=80,
-            output_dim=64,
-            num_decision_steps=6,
+            columns=30,
+            num_features=30,
+            feature_dims=31,
+            output_dim=30,
+            num_decision_steps=10,
             relaxation_factor=0.5,
             batch_momentum=0.001,
-            virtual_batch_size=2,
-            num_classes=2,
+            virtual_batch_size=8,
+            num_classes=4,
             epsilon=0.00001
     ):
 
@@ -148,7 +152,6 @@ class TabNetModel(nn.Module):
         self.final_classifier_layer = torch.nn.Linear(self.output_dim, self.num_classes, bias=False)
 
     def encoder(self, data):
-
         batch_size = data.shape[0]
         features = self.BN(data)
         output_aggregated = torch.zeros([batch_size, self.output_dim])
@@ -193,20 +196,20 @@ class TabNetModel(nn.Module):
 
                 decision_out = torch.nn.ReLU(inplace=True)(transform_f4[:, :self.output_dim])
                 # Decision aggregation
-                output_aggregated = torch.add(decision_out, output_aggregated)
+                output_aggregated = torch.add(decision_out.to(device), output_aggregated.to(device))
                 scale_agg = torch.sum(decision_out, axis=1, keepdim=True) / (self.num_decision_steps - 1)
-                aggregated_mask_values = torch.add(aggregated_mask_values, mask_values * scale_agg)
+                aggregated_mask_values = torch.add(aggregated_mask_values.to(device), mask_values.to(device) * scale_agg.to(device)).to(device)
 
                 features_for_coef = (transform_f4[:, self.output_dim:])
 
                 if ni < (self.num_decision_steps - 1):
                     mask_linear_layer = self.mask_linear_layer(features_for_coef)
                     mask_linear_norm = self.BN2(mask_linear_layer)
-                    mask_linear_norm = torch.mul(mask_linear_norm, complemantary_aggregated_mask_values)
+                    mask_linear_norm = torch.mul(mask_linear_norm.to(device), complemantary_aggregated_mask_values.to(device)).to(device)
                     mask_values = sparsemax(mask_linear_norm)
 
-                    complemantary_aggregated_mask_values = torch.mul(complemantary_aggregated_mask_values,
-                                                                     self.relaxation_factor - mask_values)
+                    complemantary_aggregated_mask_values = torch.mul(complemantary_aggregated_mask_values.to(device),
+                                                                     self.relaxation_factor - mask_values).to(device)
                     total_entropy = torch.add(total_entropy, torch.mean(
                         torch.sum(-mask_values * torch.log(mask_values + self.epsilon), axis=1)) / (
                                                           self.num_decision_steps - 1))
@@ -215,27 +218,87 @@ class TabNetModel(nn.Module):
         return output_aggregated, total_entropy
 
     def classify(self, output_logits):
-
         logits = self.final_classifier_layer(output_logits)
         predictions = torch.nn.Softmax(dim=1)(logits)
 
         return logits, predictions
 
-df_filtered = main_u.df[main_u.df["attack_cat"].isin([5, 3])]
-X_train, X_test, y_train, y_test = main_u.vertical_split(main_u.corr(df_filtered.drop(["attack_cat", "label"], axis=1)),
-                                                    df_filtered["attack_cat"])
 
 
-X_train_disc = X_train[["proto", "service", "state", "is_ftp_login", "ct_flw_http_mthd"]].to_numpy()
-X_train_cont = main_u.mac(X_train[[feature for feature in X_train.columns if feature not in X_train_disc]])
-X_train_sc = np.concatenate((X_train_disc, X_train_cont), axis=1)
+df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds2.csv"))[:141649]
+df_disc, df_cont = main_u.df_type_split(df)
+_, mainX_cont = main_u.df_type_split(main_u.X)
+X_inv = main_u.inverse_sc_cont(mainX_cont, df_cont)
+X = df_disc.join(X_inv)
 
-X_test_disc = X_test[["proto", "service", "state", "is_ftp_login", "ct_flw_http_mthd"]].to_numpy()
-X_test_cont = main_u.mac(X_test[[feature for feature in X_test.columns if feature not in X_test_disc]])
-X_test_sc = np.concatenate((X_test_disc, X_test_cont), axis=1)
+dataset = AAE_archi_opt.CustomDataset(X.to_numpy(), main_u.y.to_numpy())
+train_loader, val_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=True)
+test_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=False)
 
-y_train = y_train.to_numpy()
+classifier = TabNetModel().to(device)
+ce = torch.nn.CrossEntropyLoss().to(device)
+mse = torch.nn.MSELoss().to(device)
+bce = torch.nn.BCELoss().to(device)
+optimizer = torch.optim.SGD(classifier.parameters(), lr=0.001)
 
-classifier = TabNetModel()
-encoded = classifier.encoder(torch.tensor(X_train_sc).float().to(device))
-logit, class_pred = classifier.classify(torch.tensor(encoded[0]))
+def classifier_train():
+    classifier_losses = []
+    for epoch in range(50):
+        classifier.train()
+        losses = 0
+        num_batches = 0
+        for i, (X, y) in enumerate(train_loader):
+            X = X.float().to(device)
+            y = y.long().to(device)
+            optimizer.zero_grad()
+            output_aggregated, total_entropy = classifier.encoder(X)
+            logits, predictions = classifier.classify(output_aggregated)
+            loss = ce(logits.to(device), y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses += loss.item()
+            num_batches += 1
+
+        avg_loss = losses / num_batches
+        print(f'Epoch [{epoch+1}/{50}], Loss: {avg_loss:.4f}')
+        classifier_losses.append(avg_loss)
+    return classifier_losses
+
+
+def classifier_val():
+    classifier.eval()
+    total_loss = 0
+    num_batches = 0
+
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            output_aggregated, total_entropy = classifier.encoder(inputs.float())
+            logits, predictions = classifier.classify(output_aggregated)
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+            num_batches += 1
+
+    avg_loss = total_loss / num_batches
+    print(f'Validation Loss: {avg_loss:.4f}')
+
+    return avg_loss
+
+
+def classifier_test():
+    classifier.eval()
+    total_loss = 0
+    num_batches = 0
+
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            output_aggregated, total_entropy = classifier.encoder(inputs.float())
+            logits, predictions = classifier.classify(output_aggregated)
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+            num_batches += 1
+
+    avg_loss = total_loss / num_batches
+    print(f'Test Loss: {avg_loss:.4f}')
+
+    return avg_loss
