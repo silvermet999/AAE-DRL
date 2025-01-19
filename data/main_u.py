@@ -4,9 +4,12 @@ from scipy import stats
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, MaxAbsScaler
+from sklearn.feature_selection import RFE, RFECV
+from sklearn.svm import SVR
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from fitter import Fitter, get_common_distributions
 import warnings
 warnings.filterwarnings('ignore')
@@ -30,14 +33,19 @@ dfs = [train, test, extra]
 df = pd.concat(dfs, ignore_index=True)
 df = df.drop(df.columns[df.nunique() == 1], axis = 1) # no change
 df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
-df = df.drop(["id", "Unnamed: 0"], axis=1)
+df = df.drop(["id", "Unnamed: 0", "rate"], axis=1)
 
-df["rate"] = df["rate"].fillna(df["rate"].mean())
-df["proto"].replace("a/n", np.nan, inplace=True)
-df["service"].replace("-", np.nan, inplace=True)
-df["state"].replace("no", np.nan, inplace=True)
+df["is_ftp_login"] = df["is_ftp_login"].replace([4, 2], 1).astype(int)
 
-df.fillna('Missing', inplace=True)
+df = df[df['proto'] != 'a/n']
+df = df[df['service'] != '-']
+df = df[df["state"] != "no"]
+
+# df["proto"].replace("a/n", np.nan, inplace=True)
+# df["service"].replace("-", np.nan, inplace=True)
+# df["state"].replace("no", np.nan, inplace=True)
+
+
 df["attack_cat"] = df["attack_cat"].replace([' Fuzzers', ' Fuzzers '], "Fuzzers")
 df["attack_cat"] = df["attack_cat"].replace("Backdoors", "Backdoor")
 df["attack_cat"] = df["attack_cat"].replace(" Reconnaissance ", "Reconnaissance")
@@ -60,19 +68,6 @@ for col in cols_le:
     df = df[~df[col].isin(singletons)] # 34549, 129 => deleted 12483 samples
 
 
-def cap_outliers_iqr(df, factor=40):
-    capped_df = df.copy()
-    for column in df.select_dtypes(include=[np.number]).columns:
-        Q1 = df[column].quantile(0.25)
-        Q3 = df[column].quantile(0.75)
-        IQR = Q3 - Q1
-        lower_threshold = Q1 - factor * IQR
-        upper_threshold = Q3 + factor * IQR
-        capped_df[column] = np.where(df[column] < lower_threshold, lower_threshold, df[column])
-        capped_df[column] = np.where(capped_df[column] > upper_threshold, upper_threshold, capped_df[column])
-    return capped_df
-# df = cap_outliers_iqr(df)
-
 
 def corr(df):
     correlation = df.corr()
@@ -88,25 +83,21 @@ def corr(df):
     # sns.heatmap(correlation, annot=True, fmt=".2f", cmap="coolwarm", vmin=-1, vmax=1)
     # plt.title("Correlation Matrix Heatmap")
     # plt.savefig("corr.png")
-
-    # f_corr = pd.DataFrame.from_dict(f_corr, orient="index")
-    # f_corr = f_corr.drop_duplicates()
-    # columns_to_drop = {col_pair[0] for col_pair in f_corr.index}
-    # df = df.drop(columns=columns_to_drop)
     return f_corr
 
-df = df.drop(['ct_srv_src', 'ct_srv_dst', 'ct_src_dport_ltm', 'ct_dst_src_ltm', 'ct_dst_ltm', 'ct_src_ltm',
-              'ct_ftp_cmd', 'synack', 'ackdat', 'dloss', 'sbytes', 'stcpb', 'sloss', "dloss", "dbytes", "sbytes",
-               'is_sm_ips_ports', 'dwin', 'swin', 'state', 'tcprtt', "is_ftp_login"
-               ], axis=1)
+# df = df.drop(["proto", "is_sm_ips_ports", "is_ftp_login", "ct_ftp_cmd", "trans_depth", "swin", "stcpb", "dtcpb", "dwin",
+#               "response_body_len", "ct_flw_http_mthd"], axis=1)
+
+df = df.drop(["service", "dttl", "sttl", "is_sm_ips_ports", 'ct_ftp_cmd', 'ct_flw_http_mthd', "dload", "stcpb", "dtcpb",
+              "dmean", "ct_dst_src_ltm"], axis=1)
 
 generic = df[df['attack_cat'].isin([5])]
 genidx = generic.tail(184352).index
 df = df.drop(genidx)
-# malware_and_low_imp = df[df["attack_cat"].isin([0, 1, 8, 9, 7, 4])]
-# exploits = df[df["attack_cat"].isin([3, 2])]
 df["attack_cat"] = df["attack_cat"].replace([0, 1, 8, 9, 7, 4], 0)
 df["attack_cat"] = df["attack_cat"].replace([[3, 2]], 1)
+df["attack_cat"] = df["attack_cat"].replace(5, 2)
+df["attack_cat"] = df["attack_cat"].replace(6, 3)
 explidx = df[df['attack_cat'].isin([1])].tail(31756).index
 df = df.drop(explidx)
 
@@ -118,53 +109,70 @@ def vertical_split(X, y):
 
 
 X = df.drop(["attack_cat", "label"], axis = 1)
-y_bin = df["label"]
+y = df["attack_cat"]
+# y = pd.get_dummies(y).astype(int)
 
+X_train, X_test, y_train, y_test = vertical_split(X, y)
 
-X_train, X_test, y_train, y_test = vertical_split(X, y_bin)
+def df_type_split(df):
+    X_cont = df.drop(["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
+                      ], axis=1)
+    X_disc = df[["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
+                      ]]
+    return X_disc, X_cont
 
-def mac(df):
+def prep(X_disc, X_cont):
+    cont_cols = X_cont.columns
+    cont_index = X_cont.index
     scaler = MaxAbsScaler()
-    df = scaler.fit_transform(df)
-    return df
-
-
-def prep(X):
-    X_disc = X[["proto", "service", "ct_state_ttl", "ct_flw_http_mthd", "dttl"]]
-    X_cont = mac(X[[feature for feature in X.columns if feature not in X_disc]])
-    X_sc = np.concatenate((X_disc, X_cont), axis=1)
+    X_cont = scaler.fit_transform(X_cont)
+    X_cont = pd.DataFrame(X_cont, columns=cont_cols, index=cont_index)
+    X_sc = pd.concat([X_disc, X_cont], axis=1)
     return X_sc
 
 
-X_train_sc = prep(X_train)
-X_test_sc = prep(X_test)
+X_disc_train, X_cont_train = df_type_split(X_train)
+X_disc_test, X_cont = df_type_split(X_test)
+X_train_sc = prep(X_disc_train, X_cont_train)
+X_test_sc = prep(X_disc_test, X_cont)
 
-def inverse_sc(X, synth):
+
+def optimize_features_rfe(X, y):
+    estimator = SVR(kernel="linear")
+    cv = StratifiedKFold(n_splits=5)
+    rfecv = RFECV(estimator=estimator, step=1, cv=cv, scoring='accuracy')
+    rfecv.fit(X, y)
+    # selector = RFE(estimator, n_features_to_select=30, step=10)
+    # selector.fit(X, y)
+
+    return rfecv.ranking_
+
+
+def inverse_sc_cont(X, synth):
     max_abs_values = np.abs(X).max(axis=0)
     synth_inv = synth * max_abs_values
-    return synth_inv
+    return pd.DataFrame(synth_inv, columns=X.columns, index=synth.index)
+
 
 #
-#
-# def kolmogorov_smirnov_test(column, dist='norm'):
-#     D, p_value = stats.kstest(column, dist)
-#     return p_value > 0.05
-#
-# def anderson_darling_test(column, dist='norm'):
-#     result = stats.anderson(column, dist=dist)
-#     return result.statistic < result.critical_values[2]
-#
-# def fit_distributions(column):
-#     f = Fitter(column, distributions=get_common_distributions())
-#     f.fit()
-#     f.summary()
-#     best_fit = f.get_best(method='sumsquare_error')
-#     # best_fit_distribution = list(best_fit.keys())[0]
-#
-#     return best_fit
-#     return best_fit_distribution
+def kolmogorov_smirnov_test(column, dist='norm'):
+    D, p_value = stats.kstest(column, dist)
+    return p_value > 0.05
 
-# X_train_sc = pd.DataFrame(X_train_sc)
+def anderson_darling_test(column, dist='norm'):
+    result = stats.anderson(column, dist=dist)
+    return result.statistic < result.critical_values[2]
+
+def fit_distributions(column):
+    f = Fitter(column, distributions=get_common_distributions())
+    f.fit()
+    f.summary()
+    best_fit = f.get_best(method='sumsquare_error')
+
+    return best_fit
+
 # results = {}
 #
 # for idx, column in enumerate(X_train_sc.columns):
@@ -177,7 +185,7 @@ def inverse_sc(X, synth):
 #     col_results.append(f"{best_fit}")
 #     results[idx] = col_results
 #
-# for idx in range(22):
+# for idx in range(30):
 #     if idx in results:
 #         print(f"{idx}")
 #         for result in results[idx]:
@@ -185,4 +193,3 @@ def inverse_sc(X, synth):
 #         print()
 #     else:
 #         print(f"{idx}: No data\n")
-
