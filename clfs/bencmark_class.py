@@ -1,6 +1,8 @@
 import numpy as np
-
+import pandas as pd
 import xgboost as xgb
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import LabelBinarizer
 from xgboost import XGBClassifier
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import cross_val_predict
@@ -9,43 +11,112 @@ from sklearn.neighbors import KNeighborsClassifier
 
 
 
-X = main_u.inverse_sc(main_u.X.to_numpy(), np.loadtxt('/home/silver/PycharmProjects/AAEDRL/AAE/99.txt'))
-X_train, X_test, y_train, y_test = main_u.vertical_split(X, main_u.df["attack_cat"])
+df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds2.csv"))[:141649]
+df_disc, df_cont = main_u.df_type_split(df)
+_, mainX_cont = main_u.df_type_split(main_u.X)
+X_inv = main_u.inverse_sc_cont(mainX_cont, df_cont)
+X = df_disc.join(X_inv)
+
+X_train, X_test, y_train, y_test = main_u.vertical_split(X, main_u.y)
 dtrain = xgb.DMatrix(X_train, label=y_train)
 dvalid = xgb.DMatrix(X_test, label=y_test)
 
 def xgb_class():
-    best_params = {'booster': 'dart', 'lambda': 3.8155711333711397e-07, 'alpha': 4.65598758613365e-15,
-               'subsample': 0.9995193751264522, 'colsample_bytree': 0.8316346076096441, 'max_depth': 24,
-               'min_child_weight': 5, 'eta': 0.12275341626826634, 'gamma': 2.4961000956964835e-10,
-               'grow_policy': 'depthwise', 'sample_type': 'weighted', 'normalize_type': 'tree',
-               'rate_drop': 3.778486807843725e-05, 'skip_drop': 2.9109736020737014e-07, "verbosity": 0,
-               "objective": "multi:softmax", "num_class": 22}
+    best_params = {'booster': 'dart', 'lambda': 0.002777166262623694, 'alpha': 0.19076297470570558,
+                   'subsample': 0.8249767279788564, 'colsample_bytree': 0.9752618433258462, 'max_depth': 38,
+                   'min_child_weight': 3, 'eta': 0.06420221699462178, 'gamma': 0.022903757823417577,
+                   'grow_policy': 'depthwise', 'sample_type': 'weighted', 'normalize_type': 'forest',
+                   'rate_drop': 0.00020154770959263124, 'skip_drop': 2.858519185587543e-07, "verbosity": 0,
+                   "objective": "multi:softmax", "num_class": 30}
 
     clf = XGBClassifier(**best_params)
+    clf.fit(X_train, y_train)
+    # y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
+    # y_pred_max = np.argmax(y_pred, axis=1)
+    # report_train = classification_report(y_train, y_pred_max)
+    y_proba = clf.predict_proba(X_test)
+    lb = LabelBinarizer()
+    y_test_binarized = lb.fit_transform(y_test)
+    auc_scores = []
+    for i in range(y_proba.shape[1]):
+        auc = roc_auc_score(y_test_binarized[:, i], y_proba[:, i])
+        auc_scores.append(auc)
+        print(f"AUC-ROC for class {i}: {auc:.4f}")
+    macro_auc = roc_auc_score(y_test_binarized, y_proba, average="macro")
+    print(f"Macro-Average AUC-ROC: {macro_auc:.4f}")
+
+
     test_clf = xgb.train(best_params, dtrain)
-    return clf, test_clf
+    y_pred_val = test_clf.predict(dvalid)
+    report_test = classification_report(y_test, y_pred_val)
+    return macro_auc, report_test
 
 def KNN_class():
-    clf = KNeighborsClassifier(n_neighbors=16, metric="manhattan", leaf_size=16)
+    # on smp2
+    clf = KNeighborsClassifier(n_neighbors= 11, metric = 'euclidean', leaf_size = 72)
     clf.fit(X_train, y_train)
-    return clf
+    y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
+    y_pred_max = np.argmax(y_pred, axis=1)
+    report_train = classification_report(y_train, y_pred_max)
+    roc_auc_train = roc_auc_score(y_train, y_pred, multi_class='ovr')
+    y_pred_val = clf.predict(X_test)
+    report_test = classification_report(y_test, y_pred_val)
+    lb = LabelBinarizer()
+    y_proba = clf.predict_proba(X_test)
+    y_test_binarized = lb.fit_transform(y_test)
+    auc_scores = []
+    for i in range(y_proba.shape[1]):
+        auc = roc_auc_score(y_test_binarized[:, i], y_proba[:, i])
+        auc_scores.append(auc)
+        print(f"AUC-ROC for class {i}: {auc:.4f}")
+    macro_auc = roc_auc_score(y_test_binarized, y_proba, average="macro")
+    print(f"Macro-Average AUC-ROC: {macro_auc:.4f}")
+    return report_test, macro_auc
 
+def rf_class():
+    # on smp2
+    clf = RandomForestClassifier(
+        max_depth = 14, n_estimators = 181
+    )
+    clf.fit(X_train, y_train)
+    y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
+    y_pred_max = np.argmax(y_pred, axis=1)
+    report_train = classification_report(y_train, y_pred_max)
+    roc_auc_train = roc_auc_score(y_train, y_pred, multi_class='ovr')
+    y_pred_val = clf.predict(X_test)
+    report_test = classification_report(y_test, y_pred_val)
+    lb = LabelBinarizer()
+    y_proba = clf.predict_proba(X_test)
+    y_test_binarized = lb.fit_transform(y_test)
+    auc_scores = []
+    for i in range(y_proba.shape[1]):
+        auc = roc_auc_score(y_test_binarized[:, i], y_proba[:, i])
+        auc_scores.append(auc)
+        print(f"AUC-ROC for class {i}: {auc:.4f}")
+    macro_auc = roc_auc_score(y_test_binarized, y_proba, average="macro")
+    print(f"Macro-Average AUC-ROC: {macro_auc:.4f}")
+    return report_test, macro_auc
 
-"""_______________________________________________________train______________________________________________________"""
-clf, test_clf = xgb_class()
-y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
-report = classification_report(y_train, y_pred)
+def gb_class():
+    clf = GradientBoostingClassifier(
+        n_estimators= 19, learning_rate = 0.07232257422800473, max_depth = 10
+    )
+    clf.fit(X_train, y_train)
+    y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
+    y_pred_max = np.argmax(y_pred, axis=1)
+    report_train = classification_report(y_train, y_pred_max)
+    roc_auc_train = roc_auc_score(y_train, y_pred, multi_class='ovr')
+    y_pred_val = clf.predict(X_test)
+    report_test = classification_report(y_test, y_pred_val)
 
-
-"""_______________________________________________________test_______________________________________________________"""
-
-y_pred = test_clf.predict(dvalid)
-pred_labels = np.rint(y_pred)
-roc_auc = roc_auc_score(y_test, y_pred, multi_class='ovr')
-# report = classification_report(y_test, y_pred)
-
-
-# GB [I 2024-12-11 00:14:15,485] Trial 0 finished with value: 0.753581948152614 and parameters: {'gb_n_estimators': 28, 'gb_learning_rate': 0.04836473659876455, 'gb_max_depth': 11}. Best is trial 0 with value: 0.753581948152614.
-
-# RF [I 2024-12-10 13:28:03,055] Trial 29 finished with value: 0.7544742054947895 and parameters: {'rf_max_depth': 16, 'rf_n_estimators': 134}. Best is trial 29 with value: 0.7544742054947895.
+    lb = LabelBinarizer()
+    y_proba = clf.predict_proba(X_test)
+    y_test_binarized = lb.fit_transform(y_test)
+    auc_scores = []
+    for i in range(y_proba.shape[1]):
+        auc = roc_auc_score(y_test_binarized[:, i], y_proba[:, i])
+        auc_scores.append(auc)
+        print(f"AUC-ROC for class {i}: {auc:.4f}")
+    macro_auc = roc_auc_score(y_test_binarized, y_proba, average="macro")
+    print(f"Macro-Average AUC-ROC: {macro_auc:.4f}")
+    return report_test, macro_auc
