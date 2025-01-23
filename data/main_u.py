@@ -12,6 +12,9 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from fitter import Fitter, get_common_distributions
 import warnings
+
+import utils
+
 warnings.filterwarnings('ignore')
 
 
@@ -65,7 +68,7 @@ for col in cols_le:
 for col in cols_le:
     value_counts = df[col].value_counts()
     singletons = value_counts[value_counts == 1].index
-    df = df[~df[col].isin(singletons)] # 34549, 129 => deleted 12483 samples
+    df = df[~df[col].isin(singletons)]
 
 
 
@@ -84,9 +87,6 @@ def corr(df):
     # plt.title("Correlation Matrix Heatmap")
     # plt.savefig("corr.png")
     return f_corr
-
-# df = df.drop(["proto", "is_sm_ips_ports", "is_ftp_login", "ct_ftp_cmd", "trans_depth", "swin", "stcpb", "dtcpb", "dwin",
-#               "response_body_len", "ct_flw_http_mthd"], axis=1)
 
 df = df.drop(["service", "dttl", "sttl", "is_sm_ips_ports", 'ct_ftp_cmd', 'ct_flw_http_mthd', "dload", "stcpb", "dtcpb",
               "dmean", "ct_dst_src_ltm"], axis=1)
@@ -110,18 +110,8 @@ def vertical_split(X, y):
 
 X = df.drop(["attack_cat", "label"], axis = 1)
 y = df["attack_cat"]
-# y = pd.get_dummies(y).astype(int)
 
 X_train, X_test, y_train, y_test = vertical_split(X, y)
-
-def df_type_split(df):
-    X_cont = df.drop(["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
-                      ], axis=1)
-    X_disc = df[["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
-                      ]]
-    return X_disc, X_cont
 
 def prep(X_disc, X_cont):
     cont_cols = X_cont.columns
@@ -133,8 +123,8 @@ def prep(X_disc, X_cont):
     return X_sc
 
 
-X_disc_train, X_cont_train = df_type_split(X_train)
-X_disc_test, X_cont = df_type_split(X_test)
+X_disc_train, X_cont_train = utils.df_type_split(X_train)
+X_disc_test, X_cont = utils.df_type_split(X_test)
 X_train_sc = prep(X_disc_train, X_cont_train)
 X_test_sc = prep(X_disc_test, X_cont)
 
@@ -146,14 +136,7 @@ def optimize_features_rfe(X, y):
     rfecv.fit(X, y)
     # selector = RFE(estimator, n_features_to_select=30, step=10)
     # selector.fit(X, y)
-
     return rfecv.ranking_
-
-
-def inverse_sc_cont(X, synth):
-    max_abs_values = np.abs(X).max(axis=0)
-    synth_inv = synth * max_abs_values
-    return pd.DataFrame(synth_inv, columns=X.columns, index=synth.index)
 
 
 #
