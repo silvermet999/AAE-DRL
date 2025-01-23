@@ -15,33 +15,23 @@ import sklearn.metrics
 
 
 def objective(trial):
-    X_train = pd.DataFrame(np.loadtxt('/AAE/Adam.txt'))
-    # X_train = pd.DataFrame(main_u.X_train_sc)
-    y_train = classifier.y
 
-    # classifier_name = trial.suggest_categorical("classifier", ["SVC", "rf"])
-    # if classifier_name == "SVC":
-    #     svc_c = trial.suggest_float("svc_c", 1e-10, 1e10, log=True)
-    #     classifier_obj = sklearn.svm.SVC(C=svc_c, gamma="auto")
-
-    #
-    # elif classifier_name == "gb":
-    #     gb_n_estimators = trial.suggest_int("gb_n_estimators", 50, 200)
-    #     gb_learning_rate = trial.suggest_float("gb_learning_rate", 1e-3, 1e-1, log=True)
-    #     gb_max_depth = trial.suggest_int("gb_max_depth", 3, 12)
-    #     classifier_obj = sklearn.ensemble.GradientBoostingClassifier(
-    #         n_estimators=gb_n_estimators,
-    #         learning_rate=gb_learning_rate,
-    #         max_depth=gb_max_depth
-    #     )
-
-    k = trial.suggest_int('n_neighbors', 1, 26)
-    metric = trial.suggest_categorical('metric', ['euclidean', 'manhattan', 'minkowski'])
-    p = trial.suggest_int('p', 1, 3) if metric == 'minkowski' else 2
-    leaf_size = trial.suggest_int("leaf_size", 10, 80)
-    classifier_obj = KNeighborsClassifier(
-        n_neighbors=k, metric=metric, p=p, leaf_size=leaf_size
+    gb_n_estimators = trial.suggest_int("gb_n_estimators", 10, 30)
+    gb_learning_rate = trial.suggest_float("gb_learning_rate", 1e-3, 1e-1, log=True)
+    gb_max_depth = trial.suggest_int("gb_max_depth", 3, 12)
+    classifier_obj = sklearn.ensemble.GradientBoostingClassifier(
+        n_estimators=gb_n_estimators,
+        learning_rate=gb_learning_rate,
+        max_depth=gb_max_depth
     )
+
+    # k = trial.suggest_int('n_neighbors', 1, 30)
+    # metric = trial.suggest_categorical('metric', ['euclidean', 'manhattan', 'minkowski'])
+    # p = trial.suggest_int('p', 1, 3) if metric == 'minkowski' else 2
+    # leaf_size = trial.suggest_int("leaf_size", 10, 80)
+    # classifier_obj = KNeighborsClassifier(
+    #     n_neighbors=k, metric=metric, p=p, leaf_size=leaf_size
+    # )
 
 
 
@@ -56,10 +46,13 @@ def objective(trial):
     score = sklearn.model_selection.cross_val_score(classifier_obj, X_train, y_train, cv=5, scoring=recall_scorer).mean()
     return score
 
-X = main_u.inverse_sc(main_u.X.to_numpy(), np.loadtxt('/home/silver/PycharmProjects/AAEDRL/AAE/smp2.txt'))
-# X_train = main_u.inverse_sc(main_u.X_train.to_numpy(), X)
-# X_test = main_u.inverse_sc(main_u.X_test.to_numpy(), main_u.X_test_sc)
-X_train, X_test, y_train, y_test = main_u.vertical_split(X, main_u.df["attack_cat"])
+df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds_synth.csv"))[:141649]
+df_disc, df_cont = main_u.df_type_split(df)
+_, mainX_cont = main_u.df_type_split(main_u.X)
+X_inv = main_u.inverse_sc_cont(mainX_cont, df_cont)
+X = df_disc.join(X_inv)
+
+X_train, X_test, y_train, y_test = main_u.vertical_split(X, main_u.y)
 dtrain = xgb.DMatrix(X_train, label=y_train)
 dvalid = xgb.DMatrix(X_test, label=y_test)
 
@@ -67,7 +60,7 @@ def objectivexgb(trial):
     param = {
         "verbosity": 0,
         "objective": "multi:softmax",
-        "num_class": 22,
+        "num_class": 30,
         # defines booster, gblinear for linear functions.
         "booster": trial.suggest_categorical("booster", ["gbtree", "gblinear", "dart"]),
         # L2 regularization weight.
@@ -103,7 +96,7 @@ def objectivexgb(trial):
     return recall
 
 study = optuna.create_study(direction="maximize")
-study.optimize(objectivexgb, n_trials=200)
+study.optimize(objective, n_trials=200)
 print(study.best_trial)
 print("Number of finished trials: ", len(study.trials))
 print("Best trial:")
@@ -116,9 +109,5 @@ for key, value in trial.params.items():
 
 best_params = study.best_params
 
-
-# [I 2024-12-06 22:22:56,284] Trial 85 finished with value: 0.9749032882011606 and parameters:
-# {'booster': 'gbtree', 'lambda': 1.955696877876371e-05, 'alpha': 3.4821998334693364e-13,
-# 'subsample': 0.9640929261558455, 'colsample_bytree': 0.9027725034365305, 'max_depth': 24,
-# 'min_child_weight': 7, 'eta': 1.4433639109132085e-08, 'gamma': 0.0009949289920304545,
-# 'grow_policy': 'depthwise'}. Best is trial 85 with value: 0.9749032882011606.
+# booster': 'dart', 'lambda': 1.2741189898147751e-06, 'alpha': 1.4321357588867728e-08, 'subsample': 0.8562739949422293, 'colsample_bytree': 0.5377392681680526, 'max_depth': 14, 'min_child_weight': 2, 'eta': 0.15241836486978852, 'gamma': 0.0006231718908289008, 'grow_policy': 'depthwise', 'sample_type': 'uniform', 'normalize_type': 'forest', 'rate_drop': 7.448781837495591e-06, 'skip_drop': 2.1073884076102898e-10
+# [I 2025-01-23 08:52:23,884] Trial 18 finished with value: 0.9378215593698981 and parameters: {'gb_n_estimators': 28, 'gb_learning_rate': 0.06226465448010815, 'gb_max_depth': 9}. Best is trial 18 with value: 0.9378215593698981.
