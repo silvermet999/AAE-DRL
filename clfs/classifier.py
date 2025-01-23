@@ -115,7 +115,7 @@ class TabNetModel(nn.Module):
             self,
             columns=30,
             num_features=30,
-            feature_dims=31,
+            feature_dims=35,
             output_dim=30,
             num_decision_steps=10,
             relaxation_factor=0.5,
@@ -234,27 +234,25 @@ X = df_disc.join(X_inv)
 dataset = AAE_archi_opt.CustomDataset(X.to_numpy(), main_u.y.to_numpy())
 train_loader, val_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=True)
 test_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=False)
-
 classifier = TabNetModel().to(device)
-ce = torch.nn.CrossEntropyLoss().to(device)
-mse = torch.nn.MSELoss().to(device)
-bce = torch.nn.BCELoss().to(device)
-optimizer = torch.optim.SGD(classifier.parameters(), lr=0.001)
+optimizer = torch.optim.SGD(classifier.parameters(), lr=0.0001)
+
 
 def classifier_train():
     classifier_losses = []
+
     for epoch in range(50):
         classifier.train()
         losses = 0
         num_batches = 0
+
         for i, (X, y) in enumerate(train_loader):
             X = X.float().to(device)
             y = y.long().to(device)
             optimizer.zero_grad()
-            output_aggregated, total_entropy = classifier.encoder(X)
-            logits, predictions = classifier.classify(output_aggregated)
-            loss = ce(logits.to(device), y)
-            optimizer.zero_grad()
+            output_aggregated, _ = classifier.encoder(X)
+            logits, _ = classifier.classify(output_aggregated)
+            loss = torch.nn.functional.cross_entropy(logits, y)
             loss.backward()
             optimizer.step()
             losses += loss.item()
@@ -263,7 +261,9 @@ def classifier_train():
         avg_loss = losses / num_batches
         print(f'Epoch [{epoch+1}/{50}], Loss: {avg_loss:.4f}')
         classifier_losses.append(avg_loss)
-    return classifier_losses
+
+
+    return loss
 
 
 def classifier_val():
@@ -272,10 +272,10 @@ def classifier_val():
     num_batches = 0
 
     with torch.no_grad():
-        for inputs, labels in val_loader:
-            output_aggregated, total_entropy = classifier.encoder(inputs.float())
+        for X, y in val_loader:
+            output_aggregated, total_entropy = classifier.encoder(X.float())
             logits, predictions = classifier.classify(output_aggregated)
-            loss = criterion(logits, labels)
+            loss = torch.nn.functional.cross_entropy(logits, y)
             total_loss += loss.item()
             num_batches += 1
 
@@ -291,10 +291,10 @@ def classifier_test():
     num_batches = 0
 
     with torch.no_grad():
-        for inputs, labels in test_loader:
-            output_aggregated, total_entropy = classifier.encoder(inputs.float())
+        for X, y in test_loader:
+            output_aggregated, total_entropy = classifier.encoder(X.float())
             logits, predictions = classifier.classify(output_aggregated)
-            loss = criterion(logits, labels)
+            loss = torch.nn.functional.cross_entropy(logits, y)
             total_loss += loss.item()
             num_batches += 1
 
