@@ -1,150 +1,71 @@
+# libraries
 import torch
-import torch.utils.data
-import torch.nn.parallel
+import torch.nn as nn
 import os
-from EnvClass import Env
+import utils
 
-import numpy as np
-
-from utils import RL_dataloader
-from RL import TD3
 from AAE import AAE_archi_opt
-from clfs import classifier
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
-
 cuda = True if torch.cuda.is_available() else False
 
-def evaluate_policy(policy, dataloader, env, episode_num=10, t=None):
-    avg_reward = 0.
-    env.reset()
+class Env(nn.Module):
+    def __init__(self, model_G, model_D, model_de, classifier):
+        super(Env, self).__init__()
 
-    for i in range(0, episode_num):
-        input, label = dataloader.next_data()
-        obs = env.set_state(input)
-        done = False
-        episodeTarget = (label + torch.randint(4, label.shape)) % 4
-        while not done:
-            continuous_act, discrete_act = policy.select_action(np.array(obs))
-            cont_action = torch.tensor(continuous_act)
-            disc_action = torch.tensor(list(discrete_act.values()))
-            new_state, reward, done, _ = env(cont_action, disc_action, episodeTarget, t)
-            avg_reward += reward
-
-    avg_reward /= episode_num
-
-    return avg_reward
-
-
-class Trainer(object):
-    def __init__(self, train_loader, valid_loader, model_encoder, model_d, model_De, classifier, in_out):
-        np.random.seed(5)
-        torch.manual_seed(5)
-
-
-        self.train_loader = RL_dataloader(train_loader)
-        self.valid_loader = RL_dataloader(valid_loader)
-
-        self.epoch_size = len(self.valid_loader)
-        self.max_timesteps = 100000
-
-        self.batch_size = 2
-        self.batch_size_actor = 2
-        self.eval_freq = 1000
-        self.start_timesteps = 50
-        self.max_episodes_steps = 1000000
-
-        self.expl_noise = 0
-
-        self.encoder = model_encoder
-        self.D = model_d
-        self.De = model_De
+        self._state = None
+        self.decoder = model_de
+        self.generator = model_G
+        self.disciminator = model_D
         self.classifier = classifier
 
-        self.env = Env(self.encoder, self.D, self.De, self.classifier)
+        self.d_reward_coeff = 1
+        self.cl_reward_coeff = 0.5
+        self.bin = torch.nn.BCELoss().cuda() if cuda else torch.nn.BCELoss()
+        self.ce = torch.nn.CrossEntropyLoss().cuda() if cuda else torch.nn.CrossEntropyLoss()
 
-        self.state_dim = in_out
-        self.action_dim = 14
-        self.discrete_features = AAE_archi_opt.discrete
-        self.max_action = 1
+        self.count = 0
 
+    def reset(self):
+        self.count = 0
 
-        self.continue_timesteps = 0
+    def set_state(self, state):
+        self._state = state
+        return state.detach().cpu().numpy()
 
-        self.evaluations = []
+    def forward(self, action, disc, episode_target):
+        d_decoded = {feature: [] for feature in self.decoder.discrete_features}
+        c_decoded = {feature: [] for feature in self.decoder.continuous_features}
+        b_decoded = {feature: [] for feature in self.decoder.binary_features}
+        with (torch.no_grad()):
+            z_cont = torch.tensor(action).cuda() if cuda else torch.tensor(action)
+            z_disc = torch.tensor(list(disc.values())).cuda() if cuda else torch.tensor(list(disc.values()))
+            z_disc = z_disc.expand(z_cont.size(0), -1)
+            z = torch.concat([z_cont, z_disc], 1)
+            d, c, b = self.decoder(z)
+            d_decoded, c_decoded, b_decoded = AAE_archi_opt.types_append(d, c, b, d_decoded, c_decoded, b_decoded)
+            d_decoded, c_decoded, b_decoded = AAE_archi_opt.type_concat(d_decoded, c_decoded, b_decoded)
+            decoded = utils.all_samples(d_decoded, c_decoded, b_decoded)
+            gen_out = self.generator(decoded)
+            dis_judge = self.disciminator(gen_out)
+            classifier_output, _ = self.classifier.encoder(decoded)
+            classifier_logits, _ = self.classifier.classify(classifier_output)
 
-    def train(self):
-        sum_return = 0
-        episode_reward = 0
-        episode_timesteps = 0
-        episode_num = 0
+        episode_target = episode_target.to(torch.long).cuda() if cuda else episode_target.to(torch.long)
+        if len(episode_target.shape) == 2:
+            episode_target = episode_target.squeeze(1)
+        reward_cl = self.cl_reward_coeff * abs(self.ce(classifier_logits, episode_target).cpu().data.numpy())
+        reward_d = self.d_reward_coeff * self.bin(dis_judge, torch.ones_like(dis_judge)).cpu().data.numpy()
 
-        state_t, label = self.train_loader.next_data()
-        state = self.env.set_state(state_t)
-        episode_target = (torch.randint(4, label.shape) + label) % 4
-        self.policy = TD3(self.state_dim, self.action_dim, self.discrete_features, self.max_action, episode_target)
+        reward = reward_cl + reward_d
 
-        done = False
-        self.env.reset()
-
-        for t in range(int(self.continue_timesteps), int(self.max_timesteps)):
-            episode_timesteps += 1
-
-
-            continuous_act, discrete_act = self.policy.select_action(state)
-
-            next_state, reward, done, _ = self.env(continuous_act, discrete_act, episode_target)
-
-            self.policy.store_transition(state, continuous_act, discrete_act,
-                          next_state, reward, done, episode_target)
-
-
-
-            state = next_state
-            episode_reward += reward
-
-            if t >= self.start_timesteps:
-                self.policy.train()
-
-            if done:
-                state_t, label = self.train_loader.next_data()
-                episode_target = (torch.randint(4, label.shape) + label) % 4
-                state = self.env.set_state(state_t)
-
-                done = False
-                self.env.reset()
-
-                print('\rstep: {}, episode: {}, reward: {}'.format(t + 1, episode_num + 1, episode_reward), end='')
-                sum_return += episode_reward
-                episode_reward = 0
-                episode_timesteps = 0
-                episode_num += 1
-
-            # Evaluate episode
-            # if (t + 1) % self.eval_freq == 0:
-            #     episode_result = "step: {} episode: {} average reward: {}".format(t + 1, episode_num,
-            #                                                                       sum_return / episode_num)
-            #     print('\r' + episode_result)
-            #
-            #     valid_episode_num = 6
-            #     self.evaluations.append(evaluate_policy(self.policy, self.valid_loader, self.env,
-            #                                             episode_num=valid_episode_num, t=t))
-            #     eval_result = "evaluation over {} episodes: {}".format(valid_episode_num, self.evaluations[-1])
-            #     print(eval_result)
+        done = True
 
 
+        self.count += 1
 
-train_loader, val_loader = AAE_archi_opt.dataset_function(AAE_archi_opt.dataset, batch_size=2, train=True)
-encoder_generator = AAE_archi_opt.encoder_generator
-decoder = AAE_archi_opt.decoder
-
-
-discriminator = AAE_archi_opt.discriminator
-discriminator.eval()
-classifier = classifier.classifier
-classifier.eval()
-
-
-
-trainer = Trainer(train_loader, val_loader, encoder_generator, discriminator, decoder, classifier, 32)
+        # the nextState
+        next_state = decoded.detach().cpu().data.numpy()
+        self._state = decoded
+        return next_state, reward, done
