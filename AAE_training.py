@@ -2,11 +2,14 @@
 import os
 import pandas as pd
 from sklearn.model_selection import KFold
-
+import utils
 from AAE import AAE_archi_opt
 import torch
-from torch.nn.functional import binary_cross_entropy
+from torch.nn.functional import binary_cross_entropy, one_hot
 import itertools
+
+from data import main_u
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
@@ -14,22 +17,25 @@ cuda = True if torch.cuda.is_available() else False
 torch.cuda.empty_cache()
 torch.manual_seed(0)
 
-"""--------------------------------------------------loss and optim--------------------------------------------------"""
-encoder_generator = AAE_archi_opt.encoder_generator
-decoder = AAE_archi_opt.decoder
-discriminator = AAE_archi_opt.discriminator
-optimizer_G = torch.optim.SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.000001)
-optimizer_D = torch.optim.SGD(discriminator.parameters(), lr=0.001)
+"""--------------------------------------------------dataset and models--------------------------------------------------"""
+# dataset = CustomDataset(main_u.X_train_sc.to_numpy(), main_u.y_train.to_numpy())
+df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds.csv"))[:141649]
+X_train, X_test, y_train, y_test = main_u.vertical_split(df, main_u.y)
+dataset_synth = utils.CustomDataset(X_train.to_numpy(), y_train.to_numpy())
 
-def l2_reg(model, coef):
-    reg_loss = 0
-    for param in model.parameters():
-        reg_loss += coef * torch.norm(param) ** 2
-    return reg_loss
+in_out = 30
+z_dim = 10
+label_dim = 4
 
-def l1_reg(model, rate):
-    l1_norm = sum(p.abs().sum() for p in model.parameters())
-    return rate * l1_norm
+encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
+    AAE_archi_opt.EncoderGenerator(in_out, z_dim))
+
+decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary).cuda() if cuda \
+    else (AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary))
+
+discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
+    AAE_archi_opt.Discriminator(z_dim, ))
+
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
 def save_features_to_csv(discrete_samples, continuous_samples, binary_samples):
@@ -55,7 +61,7 @@ def save_features_to_csv(discrete_samples, continuous_samples, binary_samples):
     binary_df = dict_to_df(binary_samples)
 
     combined_df = pd.concat([discrete_df, continuous_df, binary_df], axis=1)
-    combined_df.to_csv('ds2.csv')
+    combined_df.to_csv('ds_synth.csv')
 
     return combined_df
 
@@ -74,17 +80,17 @@ def sample_runs():
     with torch.no_grad():
         n_interpolations = 4
         n_samples_per_interpolation = 35413
-        z1 = torch.randn(n_interpolations, 19).cuda() if cuda else torch.randn(n_interpolations, 19)
-        z2 = torch.randn(n_interpolations, 19).cuda() if cuda else torch.randn(n_interpolations, 19)
+        z1 = torch.randn(n_interpolations, 14).cuda() if cuda else torch.randn(n_interpolations, 14)
+        z2 = torch.randn(n_interpolations, 14).cuda() if cuda else torch.randn(n_interpolations, 14)
 
         for i in range(n_interpolations):
             interpolations = interpolate(z1[i], z2[i], n_samples_per_interpolation)
-            discrete_out, continuous_out, binary_out = decoder.disc_cont(interpolations)
+            discrete_out, continuous_out, binary_out = decoder(interpolations)
 
-            discrete_samples, continuous_samples, binary_samples = AAE_archi_opt.types_append(
+            discrete_samples, continuous_samples, binary_samples = utils.types_append(decoder,
                 discrete_out, continuous_out, binary_out, discrete_samples, continuous_samples, binary_samples)
 
-        discrete_samples, continuous_samples, binary_samples = AAE_archi_opt.type_concat(discrete_samples,
+        discrete_samples, continuous_samples, binary_samples = utils.type_concat(decoder, discrete_samples,
                                                                                          continuous_samples, binary_samples)
 
         return discrete_samples, continuous_samples, binary_samples
@@ -98,11 +104,15 @@ def get_kfold_indices(dataset, n_splits=3, shuffle=True, random_state=42):
     return indices
 
 def kfold_cross_validation():
-    kfold_indices = get_kfold_indices(AAE_archi_opt.dataset)
+    kfold_indices = get_kfold_indices(utils.dataset_synth)
     fold_metrics = []
     for fold, indices in enumerate(kfold_indices, 1):
-        train_loader, val_loader = AAE_archi_opt.dataset_function(AAE_archi_opt.dataset, batch_size_t=32, batch_size_o=64,
+        train_loader, val_loader = utils.dataset_function(utils.dataset_synth, batch_size_t=32, batch_size_o=64,
                                                                   train=True)
+
+        optimizer_G = torch.optim.SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()),
+                                      lr=0.000001)
+        optimizer_D = torch.optim.SGD(discriminator.parameters(), lr=0.001)
 
         for epoch in range(33):
             g_loss, d_loss = train_model(train_loader, optimizer_G, optimizer_D)
@@ -110,8 +120,14 @@ def kfold_cross_validation():
             g_val, d_val = evaluate_model(val_loader)
         fold_metrics.append((g_val, d_val))
         print(f"Fold {fold} completed. Metrics: {fold_metrics[-1]}")
+
+    torch.save(encoder_generator.state_dict(), "enc_gen_synth.pth")
+    torch.save(decoder.state_dict(), "dec_synth.pth")
+    torch.save(discriminator.state_dict(), "disc_synth.pth")
+
     d, c, b = sample_runs()
     save_features_to_csv(d, c, b)
+
 
 
 
@@ -129,7 +145,8 @@ def train_model(train_loader, optimizer_G, optimizer_D):
                                                                                                     requires_grad=False)
 
         real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
-        y = y.type(torch.FloatTensor).cuda() if cuda else y.type(torch.FloatTensor)
+        y = y.type(torch.LongTensor).cuda() if cuda else y.type(torch.LongTensor)
+        y = one_hot(y, num_classes=4)
 
         discrete_targets = {}
         continuous_targets = {}
@@ -147,7 +164,7 @@ def train_model(train_loader, optimizer_G, optimizer_D):
         optimizer_G.zero_grad()
         encoded = encoder_generator(real)
         dec_input = torch.cat([encoded, y], dim=1)
-        discrete_outputs, continuous_outputs, binary_outputs = decoder.disc_cont(dec_input)
+        discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
 
         g_loss = (0.1 * binary_cross_entropy(discriminator(encoded), valid) +
                   0.9 * decoder.compute_loss((discrete_outputs, continuous_outputs, binary_outputs),
@@ -157,8 +174,8 @@ def train_model(train_loader, optimizer_G, optimizer_D):
         optimizer_G.step()
 
         optimizer_D.zero_grad()
-        z = AAE_archi_opt.custom_dist((real.shape[0], AAE_archi_opt.z_dim)).cuda() if cuda else (
-            AAE_archi_opt.custom_dist((real.shape[0], AAE_archi_opt.z_dim)))
+        z = utils.custom_dist((real.shape[0], z_dim)).cuda() if cuda else (
+            utils.custom_dist((real.shape[0], z_dim)))
         real_loss = binary_cross_entropy(discriminator(z), valid)
         fake_loss = binary_cross_entropy(discriminator(encoded.detach()), fake)
         d_loss = 0.5 * (real_loss + fake_loss)
@@ -193,7 +210,8 @@ def evaluate_model(val_loader):
                                                                                                      requires_grad=False)
 
             real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
-            y = y.type(torch.FloatTensor).cuda() if cuda else y.type(torch.FloatTensor)
+            y = y.type(torch.LongTensor).cuda() if cuda else y.type(torch.LongTensor)
+            y = one_hot(y, num_classes=4)
 
             discrete_targets = {}
             continuous_targets = {}
@@ -210,7 +228,7 @@ def evaluate_model(val_loader):
 
             encoded = encoder_generator(real)
             dec_input = torch.cat([encoded, y], dim=1)
-            discrete_outputs, continuous_outputs, binary_outputs = decoder.disc_cont(dec_input)
+            discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
 
             g_loss = (0.1 * binary_cross_entropy(discriminator(encoded),
                                                  torch.ones((X.shape[0], 1),
@@ -221,9 +239,9 @@ def evaluate_model(val_loader):
 
             total_g_loss += g_loss.item()
 
-            z = AAE_archi_opt.custom_dist(
-                (real.shape[0], AAE_archi_opt.z_dim)).cuda() if cuda else AAE_archi_opt.custom_dist(
-                (real.shape[0], AAE_archi_opt.z_dim))
+            z = utils.custom_dist(
+                (real.shape[0], z_dim)).cuda() if cuda else utils.custom_dist(
+                (real.shape[0], z_dim))
             real_loss = binary_cross_entropy(discriminator(z), valid)
             fake_loss = binary_cross_entropy(discriminator(encoded.detach()), fake)
             d_loss = 0.5 * (real_loss + fake_loss)
@@ -235,3 +253,7 @@ def evaluate_model(val_loader):
         avg_d_loss = total_d_loss / len(val_loader)
 
     return avg_g_loss, avg_d_loss
+
+
+
+
