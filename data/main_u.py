@@ -13,8 +13,6 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from fitter import Fitter, get_common_distributions
 import warnings
 
-import utils
-
 warnings.filterwarnings('ignore')
 
 
@@ -113,6 +111,15 @@ y = df["attack_cat"]
 
 X_train, X_test, y_train, y_test = vertical_split(X, y)
 
+def df_type_split(df):
+    X_cont = df.drop(["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
+                      ], axis=1)
+    X_disc = df[["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
+                      ]]
+    return X_disc, X_cont
+
 def prep(X_disc, X_cont):
     cont_cols = X_cont.columns
     cont_index = X_cont.index
@@ -122,9 +129,11 @@ def prep(X_disc, X_cont):
     X_sc = pd.concat([X_disc, X_cont], axis=1)
     return X_sc
 
+X_disc, X_cont = df_type_split(X)
+X_disc_train, X_cont_train = df_type_split(X_train)
+X_disc_test, X_cont_test = df_type_split(X_test)
 
-X_disc_train, X_cont_train = utils.df_type_split(X_train)
-X_disc_test, X_cont = utils.df_type_split(X_test)
+X_sc = prep(X_disc, X_cont)
 X_train_sc = prep(X_disc_train, X_cont_train)
 X_test_sc = prep(X_disc_test, X_cont)
 
