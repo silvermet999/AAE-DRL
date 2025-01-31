@@ -1,8 +1,8 @@
 import pickle
 
 import pandas as pd
-from scipy.stats import cauchy, gamma, rayleigh, expon, chi2, uniform, exponpow, lognorm, norm
-from torch.utils.data import Dataset
+from scipy.stats import gamma, rayleigh, expon, chi2, exponpow, lognorm, norm
+from torch.utils.data import Dataset, DataLoader, Subset
 
 import numpy as np
 import torch
@@ -10,16 +10,6 @@ from data import main_u
 
 cuda = True if torch.cuda.is_available() else False
 
-
-
-def df_type_split(df):
-    X_cont = df.drop(["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
-                      ], axis=1)
-    X_disc = df[["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
-                      ]]
-    return X_disc, X_cont
 
 def custom_dist(size):
     for i, _ in enumerate(main_u.X.columns):
@@ -80,6 +70,16 @@ def type_concat(decoder, discrete_samples, continuous_samples, binary_samples):
 
 
 
+def all_samples(discrete_samples, continuous_samples, binary_samples):
+    discrete_tensors = list(discrete_samples.values())
+    continuous_tensors = list(continuous_samples.values())
+    binary_tensors = list(binary_samples.values())
+
+    all_tensors = discrete_tensors + continuous_tensors + binary_tensors
+    all_tensors = [t.unsqueeze(-1) if t.dim() == 1 else t for t in all_tensors]
+    combined = torch.cat(all_tensors, dim=1)
+    return combined
+
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels):
@@ -100,24 +100,16 @@ def dataset_function(dataset, batch_size_t, batch_size_o, train=True):
     test_size = total_size // 5
     val_size = total_size // 10
     train_size = total_size - (test_size + val_size)
-    train_subset = torch.utils.data.Subset(dataset, range(train_size))
-    val_subset = torch.utils.data.Subset(dataset,
-                                         range(train_size, train_size + val_size))
-    test_subset = torch.utils.data.Subset(dataset,
-                                          range(train_size + val_size, total_size))
+    train_subset = Subset(dataset, range(train_size))
+    val_subset = Subset(dataset, range(train_size, train_size + val_size))
+    test_subset = Subset(dataset, range(train_size + val_size, total_size))
     if train:
-        train_loader = torch.utils.data.DataLoader(train_subset,
-                                               batch_size=batch_size_t,
-                                               shuffle=True)
-        val_loader = torch.utils.data.DataLoader(val_subset,
-                                             batch_size=batch_size_o,
-                                             shuffle=False)
+        train_loader = DataLoader(train_subset, batch_size=batch_size_t, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size=batch_size_o, shuffle=False)
         return train_loader, val_loader
 
     else:
-        test_loader = torch.utils.data.DataLoader(test_subset,
-                                              batch_size=batch_size_o,
-                                              shuffle=False)
+        test_loader = DataLoader(test_subset, batch_size=batch_size_o, shuffle=False)
 
         return test_loader
 
@@ -126,6 +118,23 @@ def inverse_sc_cont(X, synth):
     max_abs_values = np.abs(X).max(axis=0)
     synth_inv = synth * max_abs_values
     return pd.DataFrame(synth_inv, columns=X.columns, index=synth.index)
+
+def dataset(original=False, train=True):
+    if original:
+        if train:
+            dataset = CustomDataset(main_u.X_train_sc.to_numpy(), main_u.y_train.to_numpy())
+        else:
+            dataset = CustomDataset(main_u.X_test_sc.to_numpy(), main_u.y_test.to_numpy())
+    else:
+        X = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds_synth.csv"))
+        y = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/clfs/labels.csv"))
+
+
+        X_all = pd.concat([X, main_u.X_sc], axis=0)
+        y_all = pd.concat([y, main_u.y], axis=0)
+        X_train, X_test, y_train, y_test = main_u.vertical_split(X_all, y_all)
+        dataset = CustomDataset(X_train.to_numpy(), labels=y_train.to_numpy())
+    return dataset
 
 
 
@@ -179,7 +188,7 @@ class ReplayBuffer(object):
         for i in items_iter:
             S, A1, A2, N, R, D, T = self.storage[i]
             s.append(np.array(S, copy=False))
-            a1.append(np.array(A1, copy=False))
+            a1.append(np.array(A1.detach().cpu().numpy(), copy=False))
             a2.append(np.array(list(A2.items()), copy=False))
             n.append(np.array(N, copy=False))
             r.append(np.array(R, copy=False))
@@ -190,14 +199,4 @@ class ReplayBuffer(object):
                 np.array(n).squeeze(0), np.array(r).squeeze(0), np.array(d).squeeze(0).reshape(-1, 1), np.array(t).squeeze(0))
 
 
-
-def all_samples(discrete_samples, continuous_samples, binary_samples):
-    discrete_tensors = list(discrete_samples.values())
-    continuous_tensors = list(continuous_samples.values())
-    binary_tensors = list(binary_samples.values())
-
-    all_tensors = discrete_tensors + continuous_tensors + binary_tensors
-    all_tensors = [t.unsqueeze(-1) if t.dim() == 1 else t for t in all_tensors]
-    combined = torch.cat(all_tensors, dim=1)
-    return combined
 
