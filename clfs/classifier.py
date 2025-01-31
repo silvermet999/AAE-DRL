@@ -16,6 +16,7 @@ import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
 
+import utils
 from data import main_u
 from AAE import AAE_archi_opt
 
@@ -225,18 +226,14 @@ class TabNetModel(nn.Module):
 
 
 
-df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds2.csv"))[:141649]
-df_disc, df_cont = main_u.df_type_split(df)
-_, mainX_cont = main_u.df_type_split(main_u.X)
-X_inv = main_u.inverse_sc_cont(mainX_cont, df_cont)
-X = df_disc.join(X_inv)
 
-dataset = AAE_archi_opt.CustomDataset(X.to_numpy(), main_u.y.to_numpy())
-train_loader, val_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=True)
-test_loader = AAE_archi_opt.dataset_function(dataset, 32, 64, train=False)
+original_ds = utils.dataset(original=True)
+train_loader, val_loader = utils.dataset_function(original_ds, 32, 64, train=True)
+test_loader = utils.dataset_function(original_ds, 32, 64, train=False)
 classifier = TabNetModel().to(device)
 optimizer = torch.optim.SGD(classifier.parameters(), lr=0.0001)
 
+df_synth = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/rl_ds.csv"))
 
 def classifier_train():
     classifier_losses = []
@@ -266,23 +263,23 @@ def classifier_train():
     return loss
 
 
-def classifier_val():
+def gen_labels():
     classifier.eval()
-    total_loss = 0
-    num_batches = 0
+    batch_size = 32
+    labels_list = []
+    X = torch.tensor(df_synth.values, dtype=torch.float32).to(device)
 
     with torch.no_grad():
-        for X, y in val_loader:
-            output_aggregated, total_entropy = classifier.encoder(X.float())
-            logits, predictions = classifier.classify(output_aggregated)
-            loss = torch.nn.functional.cross_entropy(logits, y)
-            total_loss += loss.item()
-            num_batches += 1
+        for i in range(0, len(X), batch_size):
+            X_b = X[i:i + batch_size]
 
-    avg_loss = total_loss / num_batches
-    print(f'Validation Loss: {avg_loss:.4f}')
+            output_aggregated, _ = classifier.encoder(X_b)
+            _, predictions = classifier.classify(output_aggregated)
+            pseudo_labels = predictions.argmax(dim=1)
+            labels_list.append(pseudo_labels)
+    pseudo_labels = torch.cat(labels_list)
 
-    return avg_loss
+    return pseudo_labels
 
 
 def classifier_test():
