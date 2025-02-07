@@ -1,14 +1,15 @@
 """-----------------------------------------------import libraries-----------------------------------------------"""
 import os
 import pandas as pd
-from sklearn.model_selection import KFold
+from torch.optim import SGD, Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau, MultiStepLR
+
 import utils
 from AAE import AAE_archi_opt
 import torch
 from torch.nn.functional import binary_cross_entropy, one_hot
 import itertools
 
-from data import main_u
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
@@ -17,16 +18,13 @@ cuda = True if torch.cuda.is_available() else False
 torch.cuda.empty_cache()
 torch.manual_seed(0)
 
-"""--------------------------------------------------dataset and models--------------------------------------------------"""
-# dataset = CustomDataset(main_u.X_train_sc.to_numpy(), main_u.y_train.to_numpy())
-df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds.csv"))[:141649]
-X_train, X_test, y_train, y_test = main_u.vertical_split(df, main_u.y)
-dataset_synth = utils.CustomDataset(X_train.to_numpy(), y_train.to_numpy())
+"""------------------------------------------------dataset and models------------------------------------------------"""
+in_out = 31
+z_dim = 16
+label_dim = 2
 
-in_out = 30
-z_dim = 10
-label_dim = 4
-
+dataset = utils.dataset(original=True)
+train_loader, val_loader = utils.dataset_function(dataset, batch_size_t=32, batch_size_o=64, train=True)
 encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
     AAE_archi_opt.EncoderGenerator(in_out, z_dim))
 
@@ -36,6 +34,28 @@ decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.c
 discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
     AAE_archi_opt.Discriminator(z_dim, ))
 
+optimizer_G = SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, momentum=0.9)
+optimizer_D = SGD(discriminator.parameters(), lr=0.001, momentum=0.9)
+scheduler_G = MultiStepLR(optimizer_G, milestones=[22,62,82], gamma=0.1)
+# scheduler_D = MultiStepLR(optimizer_D, milestones=[22,62,82], gamma=0.1)
+
+
+def gradient_penalty(discriminator, real_samples, fake_samples):
+    alpha = torch.rand(real_samples.size(0), 1)
+    interpolates = alpha * real_samples + (1 - alpha) * fake_samples
+    interpolates.requires_grad_(True)
+
+    d_interpolates = discriminator(interpolates)
+    gradients = torch.autograd.grad(
+        outputs=d_interpolates,
+        inputs=interpolates,
+        grad_outputs=torch.ones_like(d_interpolates),
+        create_graph=True,
+        retain_graph=True
+    )[0]
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+
+    return gradient_penalty
 
 """-----------------------------------------------------data gen-----------------------------------------------------"""
 def save_features_to_csv(discrete_samples, continuous_samples, binary_samples):
@@ -61,7 +81,7 @@ def save_features_to_csv(discrete_samples, continuous_samples, binary_samples):
     binary_df = dict_to_df(binary_samples)
 
     combined_df = pd.concat([discrete_df, continuous_df, binary_df], axis=1)
-    combined_df.to_csv('ds_synth.csv')
+    combined_df.to_csv('ds_aug2.csv', index=False)
 
     return combined_df
 
@@ -77,11 +97,12 @@ def sample_runs():
     discrete_samples = {feature: [] for feature in decoder.discrete_features}
     continuous_samples = {feature: [] for feature in decoder.continuous_features}
     binary_samples = {feature: [] for feature in decoder.binary_features}
+    decoder.eval()
     with torch.no_grad():
-        n_interpolations = 4
-        n_samples_per_interpolation = 35413
-        z1 = torch.randn(n_interpolations, 14).cuda() if cuda else torch.randn(n_interpolations, 14)
-        z2 = torch.randn(n_interpolations, 14).cuda() if cuda else torch.randn(n_interpolations, 14)
+        n_interpolations = 3
+        n_samples_per_interpolation = 47217
+        z1 = torch.randn(n_interpolations, 18).cuda() if cuda else torch.randn(n_interpolations, 18)
+        z2 = torch.randn(n_interpolations, 18).cuda() if cuda else torch.randn(n_interpolations, 18)
 
         for i in range(n_interpolations):
             interpolations = interpolate(z1[i], z2[i], n_samples_per_interpolation)
@@ -96,43 +117,9 @@ def sample_runs():
         return discrete_samples, continuous_samples, binary_samples
 
 
-"""-------------------------------------------------------KFold------------------------------------------------------"""
-
-def get_kfold_indices(dataset, n_splits=3, shuffle=True, random_state=42):
-    kf = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
-    indices = [(train_indices, val_indices) for train_indices, val_indices in kf.split(dataset)]
-    return indices
-
-def kfold_cross_validation():
-    kfold_indices = get_kfold_indices(utils.dataset_synth)
-    fold_metrics = []
-    for fold, indices in enumerate(kfold_indices, 1):
-        train_loader, val_loader = utils.dataset_function(utils.dataset_synth, batch_size_t=32, batch_size_o=64,
-                                                                  train=True)
-
-        optimizer_G = torch.optim.SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()),
-                                      lr=0.000001)
-        optimizer_D = torch.optim.SGD(discriminator.parameters(), lr=0.001)
-
-        for epoch in range(33):
-            g_loss, d_loss = train_model(train_loader, optimizer_G, optimizer_D)
-            print(f"Epoch {epoch+1}/{33}, g loss: {g_loss}, d loss: {d_loss}")
-            g_val, d_val = evaluate_model(val_loader)
-        fold_metrics.append((g_val, d_val))
-        print(f"Fold {fold} completed. Metrics: {fold_metrics[-1]}")
-
-    torch.save(encoder_generator.state_dict(), "enc_gen_synth.pth")
-    torch.save(decoder.state_dict(), "dec_synth.pth")
-    torch.save(discriminator.state_dict(), "disc_synth.pth")
-
-    d, c, b = sample_runs()
-    save_features_to_csv(d, c, b)
-
-
-
-
 """--------------------------------------------------model training--------------------------------------------------"""
-def train_model(train_loader, optimizer_G, optimizer_D):
+
+def train_model(train_loader):
     encoder_generator.train()
     decoder.train()
     discriminator.train()
@@ -145,40 +132,42 @@ def train_model(train_loader, optimizer_G, optimizer_D):
                                                                                                     requires_grad=False)
 
         real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
-        y = y.type(torch.LongTensor).cuda() if cuda else y.type(torch.LongTensor)
-        y = one_hot(y, num_classes=4)
+        y = y.type(torch.LongTensor).squeeze().cuda() if cuda else y.type(torch.LongTensor).squeeze()
+        y = one_hot(y, num_classes=2)
 
         discrete_targets = {}
         continuous_targets = {}
         binary_targets = {}
 
         for feature, _ in decoder.discrete_features.items():
-            discrete_targets[feature] = torch.ones(real.shape[0])
+            discrete_targets[feature] = real[:, :4]
 
         for feature in decoder.continuous_features:
-            continuous_targets[feature] = torch.ones(real.shape[0])
+            continuous_targets[feature] = real[:, 6:]
 
         for feature in decoder.binary_features:
-            binary_targets[feature] = torch.ones(real.shape[0])
+            binary_targets[feature] = real[:, 4:6]
 
         optimizer_G.zero_grad()
+        # z = torch.normal(0, 1, (real.shape[0], z_dim)).cuda() if cuda else torch.normal(0, 1, (real.shape[0], z_dim))
+        z = torch.rand(real.shape[0], z_dim) * 2 - 1
         encoded = encoder_generator(real)
         dec_input = torch.cat([encoded, y], dim=1)
         discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
 
-        g_loss = (0.1 * binary_cross_entropy(discriminator(encoded), valid) +
+        g_loss = (0.1 * binary_cross_entropy(discriminator(encoded.detach()), valid) +
                   0.9 * decoder.compute_loss((discrete_outputs, continuous_outputs, binary_outputs),
                                                (discrete_targets, continuous_targets, binary_targets)))
 
         g_loss.backward()
         optimizer_G.step()
 
+        gp = gradient_penalty(discriminator, z, encoded)
+
         optimizer_D.zero_grad()
-        z = utils.custom_dist((real.shape[0], z_dim)).cuda() if cuda else (
-            utils.custom_dist((real.shape[0], z_dim)))
         real_loss = binary_cross_entropy(discriminator(z), valid)
         fake_loss = binary_cross_entropy(discriminator(encoded.detach()), fake)
-        d_loss = 0.5 * (real_loss + fake_loss)
+        d_loss = 0.5 * (real_loss + fake_loss) + 0.2 * gp
 
         d_loss.backward()
         optimizer_D.step()
@@ -210,23 +199,24 @@ def evaluate_model(val_loader):
                                                                                                      requires_grad=False)
 
             real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
-            y = y.type(torch.LongTensor).cuda() if cuda else y.type(torch.LongTensor)
-            y = one_hot(y, num_classes=4)
+            y = y.type(torch.LongTensor).squeeze().cuda() if cuda else y.type(torch.LongTensor).squeeze()
+            y = one_hot(y, num_classes=2)
 
             discrete_targets = {}
             continuous_targets = {}
             binary_targets = {}
 
             for feature, _ in decoder.discrete_features.items():
-                discrete_targets[feature] = torch.ones(real.shape[0])
+                discrete_targets[feature] = real[:, :4]
 
             for feature in decoder.continuous_features:
-                continuous_targets[feature] = torch.ones(real.shape[0])
+                continuous_targets[feature] = real[:, 6:]
 
             for feature in decoder.binary_features:
-                binary_targets[feature] = torch.ones(real.shape[0])
+                binary_targets[feature] = real[:, 4:6]
 
             encoded = encoder_generator(real)
+
             dec_input = torch.cat([encoded, y], dim=1)
             discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
 
@@ -237,13 +227,12 @@ def evaluate_model(val_loader):
                       0.9 * decoder.compute_loss((discrete_outputs, continuous_outputs, binary_outputs),
                                                  (discrete_targets, continuous_targets, binary_targets)))
 
-            total_g_loss += g_loss.item()
+            # z = torch.normal(0, 1, (real.shape[0], z_dim)).cuda() if cuda else torch.normal(0, 1,
+            #                                                                                 (real.shape[0], z_dim))
+            z = torch.rand(real.shape[0], z_dim) * 2 - 1
 
-            z = utils.custom_dist(
-                (real.shape[0], z_dim)).cuda() if cuda else utils.custom_dist(
-                (real.shape[0], z_dim))
             real_loss = binary_cross_entropy(discriminator(z), valid)
-            fake_loss = binary_cross_entropy(discriminator(encoded.detach()), fake)
+            fake_loss = binary_cross_entropy(discriminator(encoded), fake)
             d_loss = 0.5 * (real_loss + fake_loss)
 
             total_g_loss += g_loss.item()
@@ -251,9 +240,28 @@ def evaluate_model(val_loader):
 
         avg_g_loss = total_g_loss / len(val_loader)
         avg_d_loss = total_d_loss / len(val_loader)
-
     return avg_g_loss, avg_d_loss
 
 
-
+best_d_val_loss = 0.6
+for epoch in range(101):
+    g_loss, d_loss = train_model(train_loader)
+    print(f"Epoch {epoch+1}/{101}, g loss: {g_loss}, d loss: {d_loss}")
+    if epoch % 10 ==0:
+        g_val, d_val = evaluate_model(val_loader)
+        print(f"g loss: {g_val}, d loss: {d_val}")
+        if d_val < best_d_val_loss:
+            best_val_loss = d_val
+            torch.save({'epoch': epoch,
+                        'enc_gen': encoder_generator.state_dict(),
+                        'dec': decoder.state_dict(),
+                        "disc": discriminator.state_dict(),
+                        'val_loss': d_loss}, "aae.pth")
+    scheduler_G.step()
+    # scheduler_D.step()
+            # torch.save(encoder_generator.state_dict(), "enc.pth")
+            # torch.save(decoder.state_dict(), "dec.pth")
+            # torch.save(discriminator.state_dict(), "disc.pth")
+            # d, c, b = sample_runs()
+            # save_features_to_csv(d, c, b)
 
