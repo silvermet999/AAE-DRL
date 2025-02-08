@@ -27,15 +27,17 @@ cuda = True if torch.cuda.is_available() else False
 def evaluate_policy(policy, dataloader, env, eval_episodes=10):
     torch.manual_seed(0)
     np.random.seed(0)
+    # random.seed(42)
+
     avg_reward = 0.
 
     # for i in range(0, episode_num):
     for _ in range(eval_episodes):
-        input, label = dataloader.next_data()
+        input, episode_target = dataloader.next_data()
         obs = env.set_state(input)
         env.reset()
         done = False
-        episode_target = (label + torch.randint(4, label.shape)) % 4
+        # episode_target = (label + torch.randint(4, label.shape)) % 4
 
         while not done:
             continuous_act, discrete_act = policy.select_action(obs)
@@ -51,6 +53,10 @@ def evaluate_policy(policy, dataloader, env, eval_episodes=10):
 
 class Trainer(object):
     def __init__(self, train_loader, valid_loader, model_encoder, model_disc, model_decoder, classifier, in_out, discrete):
+        torch.manual_seed(0)
+        np.random.seed(0)
+        # random.seed(42)
+
         self.train_loader = RL_dataloader(train_loader)
         self.valid_loader = RL_dataloader(valid_loader)
 
@@ -58,9 +64,9 @@ class Trainer(object):
         self.max_timesteps = 10000
 
         self.batch_size = 32
-        self.eval_freq = 500
+        self.eval_freq = 100
         self.start_timesteps = 50
-        self.max_episodes_steps = 10000
+        self.max_episodes_steps = 1000
 
         self.expl_noise = 0.3
 
@@ -76,13 +82,12 @@ class Trainer(object):
         np.random.seed(0)
 
         self.state_dim = in_out
-        self.action_dim = 7
+        self.action_dim = 11
         self.discrete_features = discrete
         self.max_action = 1
         self.policy = TD3(self.state_dim, self.action_dim, self.discrete_features, self.max_action)
 
         self.continue_timesteps = 0
-        self.save_models = True
 
         self.evaluations = []
 
@@ -95,12 +100,13 @@ class Trainer(object):
         c_list = []
         b_list = []
 
-        state_t, label = self.train_loader.next_data()
+        state_t, episode_target = self.train_loader.next_data()
         state = self.env.set_state(state_t)
-        episode_target = (torch.randint(4, label.shape) + label) % 4
+        # episode_target = (torch.randint(4, label.shape) + label) % 4
 
         done = False
         self.env.reset()
+
 
         for t in range(int(self.continue_timesteps), int(self.max_timesteps)):
             episode_timesteps += 1
@@ -109,8 +115,6 @@ class Trainer(object):
                 discrete_act = {name: random.randrange(num_actions) for name, num_actions in self.discrete_features.items()}
             else:
                 continuous_act, discrete_act = self.policy.select_action(state)
-                continuous_act = torch.tensor(continuous_act + np.random.normal(0, self.max_action * self.expl_noise,
-                                                        size=self.action_dim)).clip(-self.max_action, self.max_action).float()
 
             next_state, reward, done = self.env(continuous_act, discrete_act, episode_target)
 
@@ -124,8 +128,8 @@ class Trainer(object):
 
 
             if done:
-                state_t, label = self.train_loader.next_data()
-                episode_target = (torch.randint(4, label.shape) + label) % 4
+                state_t, episode_target = self.train_loader.next_data()
+                # episode_target = (torch.randint(4, label.shape) + label) % 4
                 state = self.env.set_state(state_t)
 
                 done = False
@@ -147,22 +151,23 @@ class Trainer(object):
                 eval_result = "episodes: {}".format(self.evaluations[-1])
                 print(eval_result)
 
-            new_state = self.encoder(torch.tensor(state).float().cuda() if cuda else torch.tensor(state).float())
-            labels = one_hot(episode_target, num_classes=4)
-            nd, nc, nb = self.decoder(torch.cat([new_state, labels.squeeze(1)], dim=1))
-            d_list.append(nd)
-            c_list.append(nc)
-            b_list.append(nb)
-        d_cat = {key: torch.cat([d[key] for d in d_list], dim=0) for key in d_list[0]}
-        c_cat = {key: torch.cat([d[key] for d in c_list], dim=0) for key in c_list[0]}
-        b_cat = {key: torch.cat([d[key] for d in b_list], dim=0) for key in b_list[0]}
-        return d_cat, c_cat, b_cat
+        #     new_state = self.encoder(torch.tensor(state).float().cuda() if cuda else torch.tensor(state).float())
+        #     labels = one_hot(episode_target, num_classes=4).cuda() if cuda else one_hot(episode_target, num_classes=4)
+        #     nd, nc, nb = self.decoder(torch.cat([new_state, labels.squeeze(1)], dim=1).cuda() if cuda else
+        #                               torch.cat([new_state, labels.squeeze(1)], dim=1))
+        #     d_list.append(nd)
+        #     c_list.append(nc)
+        #     b_list.append(nb)
+        # d_cat = {key: torch.cat([d[key] for d in d_list], dim=0) for key in d_list[0]}
+        # c_cat = {key: torch.cat([d[key] for d in c_list], dim=0) for key in c_list[0]}
+        # b_cat = {key: torch.cat([d[key] for d in b_list], dim=0) for key in b_list[0]}
+        # return d_cat, c_cat, b_cat
 
 
 
 
 in_out = 30
-z_dim = 10
+z_dim = 14
 label_dim = 4
 
 discrete = {"ct_state_ttl": 6,
@@ -171,63 +176,47 @@ discrete = {"ct_state_ttl": 6,
 }
 encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
     AAE_archi_opt.EncoderGenerator(in_out, z_dim))
-encoder_generator.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/enc_gen.pth", map_location=torch.device('cpu')))
+# encoder_generator.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/aae2.pth", map_location="cpu")["enc_gen"])
+# encoder_generator.eval()
+
 decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary).cuda() if cuda else (
     AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary))
-decoder.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/dec.pth", map_location=torch.device('cpu')))
+# decoder.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/aae2.pth", map_location="cpu")["dec"])
+# decoder.eval()
+
+
 discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
     AAE_archi_opt.Discriminator(z_dim, ))
-discriminator.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/disc.pth", map_location=torch.device('cpu')))
+discriminator.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/aae2.pth", map_location="cpu")["disc"])
 discriminator.eval()
-classifier = classifier.classifier
-classifier.eval()
 
 
-dataset = utils.dataset(original=False)
-train_loader, val_loader = utils.dataset_function(dataset, 32, 32, train=True)
+classifier_model = classifier.TabNetModel()
+classifier_model.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/clfs/best_model_rl.pth", map_location="cpu")
+                              ["model_state_dict"])
 
-d, c, b = Trainer(train_loader, val_loader, encoder_generator, discriminator, decoder, classifier, in_out, discrete).train()
+classifier_model.eval()
 
-d_dict = {key: tensor.detach().cpu().numpy() for key, tensor in d.items()}
-c_dict = {key: tensor.detach().cpu().numpy() for key, tensor in c.items()}
-b_dict = {key: tensor.detach().cpu().numpy() for key, tensor in b.items()}
+dataset = utils.dataset(original=True)
+train_loader, val_loader = utils.dataset_function(dataset, 32, 64, train=True)
 
-d_max = {key: np.argmax(value, axis=1) for key, value in d_dict.items()}
-b_max = {key: np.argmax(value, axis=1) for key, value in b_dict.items()}
+Trainer(train_loader, val_loader, encoder_generator, discriminator, decoder, classifier_model, in_out, discrete).train()
 
-# disc = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/disc.csv"))
-# cont = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/cont.csv"))
-# cont = cont.apply(lambda col: col.str.strip("[]").astype(float))
-# bin = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/bin.csv"))
-# X = pd.concat([disc, cont, bin], axis=1)
-# X.to_csv("rl_ds.csv", index=False)
+# d_dict = {key: tensor.detach().cpu().numpy() for key, tensor in d.items()}
+# c_dict = {key: tensor.detach().cpu().numpy() for key, tensor in c.items()}
+# b_dict = {key: tensor.detach().cpu().numpy() for key, tensor in b.items()}
+#
+# d_max = {key: np.argmax(value, axis=1) for key, value in d_dict.items()}
+# b_max = {key: np.argmax(value, axis=1) for key, value in b_dict.items()}
+#
+# all_dict = {**d_max, **c_dict, **b_max}
 
 
-# with open('disc.csv', 'w', newline='') as file_d:
+# with open('rl.csv', 'w', newline='') as file_d:
 #     writer = csv.writer(file_d)
-#     keys = list(d_decoded.keys())
+#     keys = list(all_dict.keys())
 #     writer.writerow(keys)
-#     max_len = max(len(d_decoded[key]) for key in keys)
+#     max_len = max(len(all_dict[key]) for key in keys)
 #     for i in range(max_len):
-#         row = [d_decoded[key][i] if i < len(d_decoded[key]) else '' for key in keys]
-#         writer.writerow(row)
-#
-#
-#
-# with open('cont.csv', 'w', newline='') as file_c:
-#     writer = csv.writer(file_c)
-#     keys = list(c_decoded.keys())
-#     writer.writerow(keys)
-#     max_len = max(len(c_decoded[key]) for key in keys)
-#     for i in range(max_len):
-#         row = [c_decoded[key][i] if i < len(c_decoded[key]) else '' for key in keys]
-#         writer.writerow(row)
-#
-# with open('bin.csv', 'w', newline='') as file_b:
-#     writer = csv.writer(file_b)
-#     keys = list(b_decoded.keys())
-#     writer.writerow(keys)
-#     max_len = max(len(b_decoded[key]) for key in keys)
-#     for i in range(max_len):
-#         row = [b_decoded[key][i] if i < len(b_decoded[key]) else '' for key in keys]
+#         row = [all_dict[key][i] if i < len(all_dict[key]) else '' for key in keys]
 #         writer.writerow(row)
