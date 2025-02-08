@@ -32,6 +32,7 @@ def custom_dist(size):
     return z
 
 discrete = {
+    # "attack_cat": 10,
             "state": 5,
             # "service": 13,
             "ct_state_ttl": 6,
@@ -104,7 +105,7 @@ def dataset_function(dataset, batch_size_t, batch_size_o, train=True):
     val_subset = Subset(dataset, range(train_size, train_size + val_size))
     test_subset = Subset(dataset, range(train_size + val_size, total_size))
     if train:
-        train_loader = DataLoader(train_subset, batch_size=batch_size_t, shuffle=True)
+        train_loader = DataLoader(train_subset, batch_size=batch_size_t, shuffle=False)
         val_loader = DataLoader(val_subset, batch_size=batch_size_o, shuffle=False)
         return train_loader, val_loader
 
@@ -119,6 +120,36 @@ def inverse_sc_cont(X, synth):
     synth_inv = synth * max_abs_values
     return pd.DataFrame(synth_inv, columns=X.columns, index=synth.index)
 
+def normalize_for_classifier(decoded):
+    # Use MaxAbsScaler normalization
+    max_abs = decoded.abs().max(dim=0).values
+    return decoded / (max_abs + 1e-7)
+
+
+def debug_classifier_performance(classifier, input_data, labels):
+    with torch.no_grad():
+        # Check input statistics
+        print(f"Input mean: {input_data.mean():.3f}, std: {input_data.std():.3f}")
+
+        # Check intermediate outputs
+        output_aggregated, entropy = classifier.encoder(input_data)
+        print(f"Encoder output mean: {output_aggregated.mean():.3f}, std: {output_aggregated.std():.3f}")
+        print(f"Entropy: {entropy:.3f}")
+
+        # Check final outputs
+        logits, predictions = classifier.classify(output_aggregated)
+        print(f"Logits mean: {logits.mean():.3f}, std: {logits.std():.3f}")
+
+        # Compare with original labels
+        loss = torch.nn.functional.cross_entropy(logits, labels)
+        print(f"Loss: {loss.item():.3f}")
+
+        # Check predictions
+        pred_classes = predictions.argmax(dim=1)
+        accuracy = (pred_classes == labels).float().mean()
+        print(f"Accuracy: {accuracy.item():.3f}")
+
+
 def dataset(original=False, train=True):
     if original:
         if train:
@@ -126,14 +157,37 @@ def dataset(original=False, train=True):
         else:
             dataset = CustomDataset(main_u.X_test_sc.to_numpy(), main_u.y_test.to_numpy())
     else:
-        X = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds_synth.csv"))
-        y = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/clfs/labels.csv"))
-
-
-        X_all = pd.concat([X, main_u.X_sc], axis=0)
-        y_all = pd.concat([y, main_u.y], axis=0)
-        X_train, X_test, y_train, y_test = main_u.vertical_split(X_all, y_all)
-        dataset = CustomDataset(X_train.to_numpy(), labels=y_train.to_numpy())
+        # df_org = pd.concat([main_u.X_sc, main_u.y], axis=1)
+        X_aae = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds_aug.csv"))
+        y_aae = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/clfs/labels_aug.csv"))
+        # df_aae = pd.concat([X_aae, y_aae], axis=1)
+        # df_aae = df_aae[df_aae["attack_cat"] != 2]
+        # X_rl = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/rl.csv"))
+        # X_rl = X_rl.apply(lambda col: col.str.strip("[]").astype(float) if col.dtype == "object" else col)
+        # y_rl = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/clfs/labels_rl.csv"))
+        # df_rl = pd.concat([X_rl, y_rl], axis=1)
+        # df_rl = df_rl.drop(df_rl[(df_rl['attack_cat'] == 0) & (df_rl['confidence'] == 1.0)].index)
+        y_aae = y_aae.drop(["confidence"], axis=1)
+        #
+        # df_all = pd.concat([df_aae, df_rl, df_org], axis=0)
+        # X = df_all.drop(["attack_cat"], axis=1)
+        # y = df_all["attack_cat"]
+        # df = pd.concat([X, y], axis=1)
+        # df = df[df["attack_cat"] != 2]
+        # y = y[y["attack_cat"] != 2]
+        # generic = y[y['attack_cat'].isin([0])]
+        # genidx = generic.tail(130000).index
+        # y = y.drop(genidx)
+        #
+        # indices_k = y.index
+        # X = X.loc[indices_k]
+        # X_all = pd.concat([X, main_u.X_sc], axis=0)
+        # y_all = pd.concat([y, main_u.y], axis=0)
+        X_train, X_test, y_train, y_test = main_u.vertical_split(X_aae, y_aae)
+        if train:
+            dataset = CustomDataset(X_train.to_numpy(), labels=y_train.to_numpy())
+        else:
+            dataset = CustomDataset(X_test.to_numpy(), labels=y_test.to_numpy())
     return dataset
 
 
@@ -200,3 +254,31 @@ class ReplayBuffer(object):
 
 
 
+MINORITY_CLASSES = [0, 1]
+def is_minority_class(generated_sample, classifier=None):
+    """
+    Checks if the generated sample belongs to a minority class.
+
+    Args:
+        generated_sample: The generated data sample.
+        classifier: (Optional) A pre-trained classifier to predict the sample's class if not explicitly available.
+
+    Returns:
+        bool: True if the sample belongs to a minority class, False otherwise.
+    """
+    # 1. Extract the class label directly, or use a classifier if the label is not provided
+    if classifier:  # Use a classifier to predict the class
+        _, sample_class = classifier.classify(generated_sample)
+    else:
+        raise ValueError("no classifier provided for prediction.")
+
+    # 2. Check if the class is in the minority classes
+    return sample_class in MINORITY_CLASSES
+
+
+def calculate_reward(classifier, reward, generated_sample, minority_class_ratio=3):
+    if is_minority_class(generated_sample, classifier):
+        minority_boost = 1 / minority_class_ratio
+        return reward * minority_boost
+
+    return reward
