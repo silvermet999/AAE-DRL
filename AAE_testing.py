@@ -1,4 +1,5 @@
 import pandas as pd
+from torch.optim import SGD
 
 import utils
 from AAE import AAE_archi_opt
@@ -23,29 +24,28 @@ in_out = 30
 z_dim = 10
 label_dim = 4
 
-# dataset = CustomDataset(main_u.X_train_sc.to_numpy(), main_u.y_train.to_numpy())
-df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds.csv"))[:141649]
-X_train, X_test, y_train, y_test = main_u.vertical_split(df, main_u.y)
-dataset_synth = utils.CustomDataset(X_train.to_numpy(), y_train.to_numpy())
-test_loader =utils.dataset_function(dataset_synth, 32, 64, train=False)
+
+dataset = utils.dataset(original=True, train=False)
+test_loader =utils.dataset_function(dataset, 32, 64, train=False)
 
 
 encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
     AAE_archi_opt.EncoderGenerator(in_out, z_dim))
+encoder_generator.load_state_dict(torch.load("aae3.pth", map_location="cpu")["enc_gen"])
+
 
 decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary).cuda() if cuda \
     else (AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary))
+decoder.load_state_dict(torch.load("aae3.pth", map_location="cpu")["dec"])
 
 discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
     AAE_archi_opt.Discriminator(z_dim, ))
-
-optimizer_G = torch.optim.SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()),
-                              lr=0.000001)
-optimizer_D = torch.optim.SGD(discriminator.parameters(), lr=0.001)
+discriminator.load_state_dict(torch.load("aae3.pth", map_location="cpu")["disc"])
 
 
-
-# Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+optimizer_G = SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()),
+                              lr=0.001)
+optimizer_D = SGD(discriminator.parameters(), lr=0.001)
 
 
 def test_model(test_loader):
@@ -62,31 +62,37 @@ def test_model(test_loader):
                                                                                                     requires_grad=False)
             fake = torch.zeros((X.shape[0], 1), requires_grad=False).cuda() if cuda else torch.zeros((X.shape[0], 1),
                                                                                                      requires_grad=False)
+
             real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
-            y = y.type(torch.LongTensor).cuda() if cuda else y.type(torch.LongTensor)
+            y = y.type(torch.LongTensor).squeeze().cuda() if cuda else y.type(torch.LongTensor).squeeze()
             y = one_hot(y, num_classes=4)
 
             discrete_targets = {}
             continuous_targets = {}
             binary_targets = {}
+
             for feature, _ in decoder.discrete_features.items():
-                discrete_targets[feature] = torch.ones(real.shape[0])
+                discrete_targets[feature] = real[:, :3]
 
             for feature in decoder.continuous_features:
-                continuous_targets[feature] = torch.ones(real.shape[0])
+                continuous_targets[feature] = real[:, 5:]
 
             for feature in decoder.binary_features:
-                binary_targets[feature] = torch.ones(real.shape[0])
+                binary_targets[feature] = real[:, 3:5]
 
             encoded = encoder_generator(real)
             dec_input = torch.cat([encoded, y], dim=1)
             discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
 
-            g_loss = (0.1 * binary_cross_entropy(discriminator(encoded), valid) +
+            g_loss = (0.1 * binary_cross_entropy(discriminator(encoded),
+                                                 torch.ones((X.shape[0], 1),
+                                                            requires_grad=False).cuda() if cuda else torch.ones(
+                                                     (X.shape[0], 1), requires_grad=False)) +
                       0.9 * decoder.compute_loss((discrete_outputs, continuous_outputs, binary_outputs),
                                                  (discrete_targets, continuous_targets, binary_targets)))
 
-            z = utils.custom_dist((real.shape[0], z_dim)).cuda() if cuda else utils.custom_dist((real.shape[0], z_dim))
+
+            z = torch.rand(real.shape[0], z_dim).cuda() if cuda else torch.rand(real.shape[0], z_dim)
             real_loss = binary_cross_entropy(discriminator(z), valid)
             fake_loss = binary_cross_entropy(discriminator(encoded.detach()), fake)
             d_loss = 0.5 * (real_loss + fake_loss)
@@ -94,8 +100,8 @@ def test_model(test_loader):
             total_g_loss += g_loss.item()
             total_d_loss += d_loss.item()
 
-    avg_g_loss = total_g_loss / len(test_loader)
-    avg_d_loss = total_d_loss / len(test_loader)
+        avg_g_loss = total_g_loss / len(test_loader)
+        avg_d_loss = total_d_loss / len(test_loader)
 
     return {
         'g_loss': avg_g_loss,
