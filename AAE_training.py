@@ -19,11 +19,11 @@ torch.cuda.empty_cache()
 torch.manual_seed(0)
 
 """------------------------------------------------dataset and models------------------------------------------------"""
-in_out = 31
-z_dim = 16
-label_dim = 2
+in_out = 30
+z_dim = 10
+label_dim = 4
 
-dataset = utils.dataset(original=True)
+dataset = utils.dataset(original=True, train=True)
 train_loader, val_loader = utils.dataset_function(dataset, batch_size_t=32, batch_size_o=64, train=True)
 encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
     AAE_archi_opt.EncoderGenerator(in_out, z_dim))
@@ -36,12 +36,12 @@ discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
 
 optimizer_G = SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()), lr=0.001, momentum=0.9)
 optimizer_D = SGD(discriminator.parameters(), lr=0.001, momentum=0.9)
-scheduler_G = MultiStepLR(optimizer_G, milestones=[22,62,82], gamma=0.1)
-# scheduler_D = MultiStepLR(optimizer_D, milestones=[22,62,82], gamma=0.1)
+scheduler_G = MultiStepLR(optimizer_G, milestones=[42, 82], gamma=0.1)
+scheduler_D = MultiStepLR(optimizer_D, milestones=[42, 82], gamma=0.1)
 
 
 def gradient_penalty(discriminator, real_samples, fake_samples):
-    alpha = torch.rand(real_samples.size(0), 1)
+    alpha = torch.rand(real_samples.size(0), 1).cuda() if cuda else torch.rand(real_samples.size(0), 1)
     interpolates = alpha * real_samples + (1 - alpha) * fake_samples
     interpolates.requires_grad_(True)
 
@@ -81,7 +81,7 @@ def save_features_to_csv(discrete_samples, continuous_samples, binary_samples):
     binary_df = dict_to_df(binary_samples)
 
     combined_df = pd.concat([discrete_df, continuous_df, binary_df], axis=1)
-    combined_df.to_csv('ds_aug2.csv', index=False)
+    combined_df.to_csv('ds_1.csv', index=False)
 
     return combined_df
 
@@ -99,8 +99,8 @@ def sample_runs():
     binary_samples = {feature: [] for feature in decoder.binary_features}
     decoder.eval()
     with torch.no_grad():
-        n_interpolations = 3
-        n_samples_per_interpolation = 47217
+        n_interpolations = 5
+        n_samples_per_interpolation = 27321 #34067
         z1 = torch.randn(n_interpolations, 18).cuda() if cuda else torch.randn(n_interpolations, 18)
         z2 = torch.randn(n_interpolations, 18).cuda() if cuda else torch.randn(n_interpolations, 18)
 
@@ -133,7 +133,7 @@ def train_model(train_loader):
 
         real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
         y = y.type(torch.LongTensor).squeeze().cuda() if cuda else y.type(torch.LongTensor).squeeze()
-        y = one_hot(y, num_classes=2)
+        y = one_hot(y, num_classes=4)
 
         discrete_targets = {}
         continuous_targets = {}
@@ -150,7 +150,7 @@ def train_model(train_loader):
 
         optimizer_G.zero_grad()
         # z = torch.normal(0, 1, (real.shape[0], z_dim)).cuda() if cuda else torch.normal(0, 1, (real.shape[0], z_dim))
-        z = torch.rand(real.shape[0], z_dim) * 2 - 1
+        z = torch.rand(real.shape[0], z_dim).cuda() if cuda else torch.rand(real.shape[0], z_dim)
         encoded = encoder_generator(real)
         dec_input = torch.cat([encoded, y], dim=1)
         discrete_outputs, continuous_outputs, binary_outputs = decoder(dec_input)
@@ -200,20 +200,20 @@ def evaluate_model(val_loader):
 
             real = X.type(torch.FloatTensor).cuda() if cuda else X.type(torch.FloatTensor)
             y = y.type(torch.LongTensor).squeeze().cuda() if cuda else y.type(torch.LongTensor).squeeze()
-            y = one_hot(y, num_classes=2)
+            y = one_hot(y, num_classes=4)
 
             discrete_targets = {}
             continuous_targets = {}
             binary_targets = {}
 
             for feature, _ in decoder.discrete_features.items():
-                discrete_targets[feature] = real[:, :4]
+                discrete_targets[feature] = real[:, :3]
 
             for feature in decoder.continuous_features:
-                continuous_targets[feature] = real[:, 6:]
+                continuous_targets[feature] = real[:, 5:]
 
             for feature in decoder.binary_features:
-                binary_targets[feature] = real[:, 4:6]
+                binary_targets[feature] = real[:, 3:5]
 
             encoded = encoder_generator(real)
 
@@ -227,9 +227,8 @@ def evaluate_model(val_loader):
                       0.9 * decoder.compute_loss((discrete_outputs, continuous_outputs, binary_outputs),
                                                  (discrete_targets, continuous_targets, binary_targets)))
 
-            # z = torch.normal(0, 1, (real.shape[0], z_dim)).cuda() if cuda else torch.normal(0, 1,
-            #                                                                                 (real.shape[0], z_dim))
-            z = torch.rand(real.shape[0], z_dim) * 2 - 1
+
+            z = torch.rand(real.shape[0], z_dim).cuda() if cuda else torch.rand(real.shape[0], z_dim)
 
             real_loss = binary_cross_entropy(discriminator(z), valid)
             fake_loss = binary_cross_entropy(discriminator(encoded), fake)
@@ -251,17 +250,15 @@ for epoch in range(101):
         g_val, d_val = evaluate_model(val_loader)
         print(f"g loss: {g_val}, d loss: {d_val}")
         if d_val < best_d_val_loss:
-            best_val_loss = d_val
+            best_d_val_loss = d_val
             torch.save({'epoch': epoch,
                         'enc_gen': encoder_generator.state_dict(),
                         'dec': decoder.state_dict(),
                         "disc": discriminator.state_dict(),
-                        'val_loss': d_loss}, "aae.pth")
-    scheduler_G.step()
+                        'val_loss': d_loss}, "aae3.pth")
+    # scheduler_G.step()
     # scheduler_D.step()
-            # torch.save(encoder_generator.state_dict(), "enc.pth")
-            # torch.save(decoder.state_dict(), "dec.pth")
-            # torch.save(discriminator.state_dict(), "disc.pth")
-            # d, c, b = sample_runs()
-            # save_features_to_csv(d, c, b)
+
+# d, c, b = sample_runs()
+# save_features_to_csv(d, c, b)
 
