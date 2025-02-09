@@ -2,7 +2,7 @@ import pandas as pd
 import torch
 from torch import exp
 from torch.nn import ModuleDict, Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Softmax, \
-    MSELoss, CrossEntropyLoss, BCELoss
+    MSELoss, CrossEntropyLoss, BCELoss, ReLU
 
 import utils
 from data import main_u
@@ -29,7 +29,7 @@ class Attention(Module):
 
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
-    sampled_z = utils.custom_dist((mu.size(0), z_dim)).cuda() if cuda else utils.custom_dist((mu.size(0), z_dim))
+    sampled_z = torch.rand(mu.size(0), z_dim).cuda() if cuda else torch.rand(mu.size(0), z_dim)
     z = sampled_z * std + mu
     return z
 
@@ -43,19 +43,17 @@ class EncoderGenerator(Module):
         self.h2 = 20
 
         seq = [
-
             Linear(self.dim, self.h1),
-            LeakyReLU(),
-            BatchNorm1d(self.h1),
-            Dropout(0.5),
-            # Linear(self.h1, self.h1),
-            # LeakyReLU(),
+            ReLU(),
             # BatchNorm1d(self.h1),
+            Dropout(0.2),
+
             Linear(self.h1, self.h2),
-            LeakyReLU(),
-            BatchNorm1d(self.h2),
-            # Linear(self.h2, self.h2),
-            # LeakyReLU(),
+            ReLU(),
+            # BatchNorm1d(self.h1),
+
+            Linear(self.h2, self.h2),
+            ReLU(),
             # BatchNorm1d(self.h2)
                ]
         self.seq = Sequential(*seq)
@@ -84,19 +82,18 @@ class Decoder(Module):
 
         self.shared = Sequential(
             Linear(self.dim, self.h1),
-            LeakyReLU(),
-            BatchNorm1d(self.h1),
-            Dropout(0.3),
+            ReLU(),
+            # BatchNorm1d(self.h1),
+            # Dropout(0.3),
+
             Linear(self.h1, self.h2),
-            LeakyReLU(),
-            BatchNorm1d(self.h2),
-            Dropout(0.2),
-            Linear(self.h2, self.h2),
-            LeakyReLU(),
-            BatchNorm1d(self.h2),
+            ReLU(),
+            # BatchNorm1d(self.h2),
+            # Dropout(0.2),
+
             Linear(self.h2, self.in_out),
-            LeakyReLU(),
-            BatchNorm1d(self.in_out)
+            ReLU(),
+            # BatchNorm1d(self.in_out),
         )
 
         self.discrete_out = {feature: Linear(self.in_out, num_classes)
@@ -114,7 +111,7 @@ class Decoder(Module):
         self.mse = MSELoss()
         self.bce = BCELoss()
         self.softmax = Softmax(dim=-1)
-        self.tanh = Tanh()
+        self.relu = ReLU()
         self.sigmoid = Sigmoid()
 
     def forward(self, x):
@@ -129,7 +126,7 @@ class Decoder(Module):
             discrete_outputs[feature] = self.softmax(logits)
 
         for feature in self.continuous_features:
-            continuous_outputs[feature] = self.tanh(self.continuous_out[feature](shared_features))
+            continuous_outputs[feature] = self.relu(self.continuous_out[feature](shared_features))
 
         for feature in self.binary_features:
             binary_outputs[feature] = self.sigmoid(self.binary_out[feature](shared_features))
@@ -160,29 +157,32 @@ class Decoder(Module):
 class Discriminator(Module):
     def __init__(self, dim):
         super(Discriminator, self).__init__()
-        self.h1 = 12
-        self.h2 = 10
-        self.h3 = 8
+        self.h1 = 10
+        self.h2 = 5
 
         seq = [
             Linear(dim, self.h1),
-            LeakyReLU(),
+            ReLU(),
+            # BatchNorm1d(self.h1),
+            # Dropout(0.2),
+
             Linear(self.h1, self.h1),
-            LeakyReLU(),
-            Linear(self.h1, self.h1),
-            LeakyReLU(),
-            Dropout(0.2),
-            Linear(self.h1, self.h1),
-            LeakyReLU(),
-            Linear(self.h1, self.h1),
-            LeakyReLU(),
+            ReLU(),
+            # BatchNorm1d(self.h1),
+
             Linear(self.h1, self.h2),
-            LeakyReLU(),
-            Dropout(0.1),
-            Attention(self.h2, 3),
-            Linear(self.h2, self.h3),
-            LeakyReLU(),
-            Linear(self.h3, 1),
+            ReLU(),
+            # BatchNorm1d(self.h2),
+            # Dropout(0.1),
+
+            Attention(self.h2, 5),
+            ReLU(),
+
+            Linear(self.h2, self.h2),
+            ReLU(),
+            # BatchNorm1d(self.h2),
+
+            Linear(self.h2, 1),
             Sigmoid()]
         self.seq = Sequential(*seq)
     def forward(self, x):
