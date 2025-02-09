@@ -3,7 +3,7 @@ from collections import defaultdict
 from scipy import stats
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, MaxAbsScaler
+from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
 from sklearn.feature_selection import RFE, RFECV
 from sklearn.svm import SVR
 
@@ -34,7 +34,7 @@ dfs = [train, test, extra]
 df = pd.concat(dfs, ignore_index=True)
 df = df.drop(df.columns[df.nunique() == 1], axis = 1) # no change
 df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
-df = df.drop(["id", "Unnamed: 0", "rate"], axis=1)
+df = df.drop(["id", "rate"], axis=1)
 
 df["is_ftp_login"] = df["is_ftp_login"].replace([4, 2], 1).astype(int)
 
@@ -89,16 +89,20 @@ def corr(df):
 df = df.drop(["service", "dttl", "sttl", "is_sm_ips_ports", 'ct_ftp_cmd', 'ct_flw_http_mthd', "dload", "stcpb", "dtcpb",
               "dmean", "ct_dst_src_ltm"], axis=1)
 
+normal = df[df['attack_cat'].isin([6])]
+noridx = normal.tail(240000).index
+df = df.drop(noridx)
 generic = df[df['attack_cat'].isin([5])]
-genidx = generic.tail(184352).index
+genidx = generic.tail(240000).index
 df = df.drop(genidx)
-df["attack_cat"] = df["attack_cat"].replace([0, 1, 8, 9, 7, 4], 0)
-df["attack_cat"] = df["attack_cat"].replace([[3, 2]], 1)
-df["attack_cat"] = df["attack_cat"].replace(5, 2)
+df["attack_cat"] = df["attack_cat"].replace([2, 4, 7, 0, 8, 1], 0)
+df["attack_cat"] = df["attack_cat"].replace(5, 1)
+df["attack_cat"] = df["attack_cat"].replace(3, 2)
 df["attack_cat"] = df["attack_cat"].replace(6, 3)
-explidx = df[df['attack_cat'].isin([1])].tail(31756).index
-df = df.drop(explidx)
-
+# explidx = df[df['attack_cat'].isin([1])].tail(31756).index
+# df = df.drop(explidx)
+# profiler = ProfileReport(df)
+# profiler.to_file("report.html")
 
 """-----------------------------------------------vertical data split-----------------------------------------------"""
 def vertical_split(X, y):
@@ -112,10 +116,10 @@ y = df["attack_cat"]
 X_train, X_test, y_train, y_test = vertical_split(X, y)
 
 def df_type_split(df):
-    X_cont = df.drop(["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+    X_cont = df.drop(['state', 'ct_state_ttl', "trans_depth", "proto", "is_ftp_login",
                       # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
                       ], axis=1)
-    X_disc = df[["proto", "trans_depth", 'state', 'ct_state_ttl', "is_ftp_login",
+    X_disc = df[['state', 'ct_state_ttl', "trans_depth", "proto", "is_ftp_login"
                       # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
                       ]]
     return X_disc, X_cont
@@ -123,7 +127,7 @@ def df_type_split(df):
 def prep(X_disc, X_cont):
     cont_cols = X_cont.columns
     cont_index = X_cont.index
-    scaler = MaxAbsScaler()
+    scaler = MinMaxScaler()
     X_cont = scaler.fit_transform(X_cont)
     X_cont = pd.DataFrame(X_cont, columns=cont_cols, index=cont_index)
     X_sc = pd.concat([X_disc, X_cont], axis=1)
@@ -135,7 +139,7 @@ X_disc_test, X_cont_test = df_type_split(X_test)
 
 X_sc = prep(X_disc, X_cont)
 X_train_sc = prep(X_disc_train, X_cont_train)
-X_test_sc = prep(X_disc_test, X_cont)
+X_test_sc = prep(X_disc_test, X_cont_test)
 
 
 def optimize_features_rfe(X, y):
@@ -177,7 +181,7 @@ def fit_distributions(column):
 #     col_results.append(f"{best_fit}")
 #     results[idx] = col_results
 #
-# for idx in range(30):
+# for idx in range(31):
 #     if idx in results:
 #         print(f"{idx}")
 #         for result in results[idx]:
